@@ -16,11 +16,20 @@ import matplotlib.pyplot as plt
 
 from bench.ablation import AblationResult
 
-# Professional palette (brand reference — sequential blue).
-COLOR_BAR = "#1a80bb"    # lossless — medium blue
-COLOR_LOSSY = "#8cc5e3"  # lossy (quality-guarded) — light blue
-COLOR_ANNOT = "black"    # contribution (%) labels
+# Professional palette (brand reference — sequential blue + teal).
+COLOR_BAR = "#1a80bb"      # lossless — medium blue
+COLOR_LOSSY = "#8cc5e3"    # lossy (quality-guarded) — light blue
+COLOR_SCALING = "#298c8c"  # scaling / multi-GPU (e.g. CFG-Parallel) — teal
+COLOR_ANNOT = "black"      # contribution (%) labels
 COLOR_GRID = "#d9d9d9"
+
+
+def _bar_color(row: dict) -> str:
+    if row.get("scaling"):
+        return COLOR_SCALING
+    if row.get("lossy"):
+        return COLOR_LOSSY
+    return COLOR_BAR
 
 
 def _grid(n: int):
@@ -42,7 +51,7 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
         rows_data = result.marginal_rows(op.name)
         labels = [r["variant"] for r in rows_data]
         lat = [r["ms"] for r in rows_data]
-        colors = [COLOR_LOSSY if r["lossy"] else COLOR_BAR for r in rows_data]
+        colors = [_bar_color(r) for r in rows_data]
 
         x = range(len(labels))
         ax.set_axisbelow(True)                                   # grid behind the bars
@@ -65,11 +74,16 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
     for j in range(len(ops), rows * cols):
         axes[j // cols][j % cols].axis("off")
 
-    # single overall legend indicating the lossy operations
-    handles = [plt.Rectangle((0, 0), 1, 1, color=COLOR_BAR),
-               plt.Rectangle((0, 0), 1, 1, color=COLOR_LOSSY)]
-    fig.legend(handles, ["lossless", "lossy (quality-guarded)"],
-               loc="lower center", ncol=2, fontsize=10, frameon=False)
+    # single overall legend — only the categories actually present
+    all_rows = [r for op in ops for r in result.marginal_rows(op.name)]
+    legend_items = [(COLOR_BAR, "lossless")]
+    if any(r["lossy"] and not r["scaling"] for r in all_rows):
+        legend_items.append((COLOR_LOSSY, "lossy (quality-guarded)"))
+    if any(r["scaling"] for r in all_rows):
+        legend_items.append((COLOR_SCALING, "scaling (multi-GPU)"))
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c, _ in legend_items]
+    fig.legend(handles, [lbl for _, lbl in legend_items],
+               loc="lower center", ncol=len(legend_items), fontsize=10, frameon=False)
 
     plt.tight_layout(rect=(0, 0.03, 1, 0.97))
     out = Path(out_path)

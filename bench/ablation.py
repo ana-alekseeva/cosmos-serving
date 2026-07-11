@@ -47,6 +47,7 @@ class AblationResult:
                 "vs_v0": round(vs0, 2),
                 "vs_prev": round(vsp, 2),
                 "lossy": bool(v.technique and v.technique.lossy),
+                "scaling": bool(v.technique and v.technique.scaling),
             })
             prev = ms
         return rows
@@ -96,7 +97,7 @@ def print_summary(result: AblationResult) -> None:
         print(f"{'Variant':<34}{'ms':>12}{'vs V0':>10}{'vs prev':>10}")
         print("-" * 72)
         for row in result.marginal_rows(op.name):
-            tag = "  *lossy" if row["lossy"] else ""
+            tag = "  *2-GPU" if row["scaling"] else ("  *lossy" if row["lossy"] else "")
             print(f"{row['variant']:<34}{row['ms']:>12.1f}"
                   f"{row['vs_v0']:>9.2f}x{row['vs_prev']:>9.2f}x{tag}")
         print("-" * 72)

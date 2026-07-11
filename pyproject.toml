@@ -25,3 +25,7 @@ dev = [
 [tool.uv]
 # Flat app layout (bench/ + optimize/ importable via cwd); don't build/install the project itself.
 package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]     # flat layout: put repo root on sys.path so `import bench` works
+testpaths = ["tests"]

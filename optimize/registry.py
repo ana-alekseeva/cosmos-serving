@@ -29,6 +29,7 @@ class Technique:
     engine_flags: dict       # real-backend flags (wired on the GPU)
     mock_speedups: dict      # op_name -> latency divisor (>1 = faster); mock only
     note: str = ""
+    scaling: bool = False    # True -> uses extra GPUs (e.g. CFG-Parallel): a scaling win, not per-GPU
 
 
 # ---------------------------------------------------------------------------
@@ -70,25 +71,26 @@ REASONER_TECHNIQUES: list[Technique] = [
 # Baseline already runs sequential CFG; cfg-parallel is the CFG *optimization*.
 # ---------------------------------------------------------------------------
 GENERATOR_TECHNIQUES: list[Technique] = [
-    Technique("reasoner-cache", "reasoner-tower output caching", GENERATOR, False, "R256",
+    Technique("reasoner-cache", "reasoner-tower output caching", GENERATOR, False, "t2i-1024",
               {"cosmos": {"reasoner_cache": True}},
-              {"R256": 1.10, "R480": 1.08, "R720": 1.06}),
-    Technique("cuda-graphs", "torch.compile / CUDA graphs", GENERATOR, False, "R256",
+              {"t2i-1024": 1.15, "t2v-256": 1.10, "i2v-480": 1.08, "t2v-720": 1.06}),
+    Technique("cuda-graphs", "torch.compile / CUDA graphs", GENERATOR, False, "t2i-1024",
               {"cosmos": {"cuda_graphs": True}},
-              {"R256": 1.40, "R480": 1.10, "R720": 1.05}),
-    Technique("cache-dit", "Cache-DiT", GENERATOR, True, "R720",
+              {"t2i-1024": 1.55, "t2v-256": 1.25, "i2v-480": 1.10, "t2v-720": 1.05}),
+    Technique("cache-dit", "Cache-DiT", GENERATOR, True, "t2v-720",
               {"vllm_omni": {"cache_dit": True}},
-              {"R256": 1.30, "R480": 1.50, "R720": 1.60}),
-    Technique("fp8", "FP8 quantization", GENERATOR, True, "R480",
+              {"t2i-1024": 1.20, "t2v-256": 1.35, "i2v-480": 1.50, "t2v-720": 1.60}),
+    Technique("fp8", "FP8 quantization", GENERATOR, True, "t2v-720",
               {"vllm_omni": {"quantization": "fp8"}},
-              {"R256": 1.50, "R480": 1.50, "R720": 1.50}),
-    Technique("vae-patch", "VAE-Patch-Parallel", GENERATOR, False, "R720",
+              {"t2i-1024": 1.40, "t2v-256": 1.45, "i2v-480": 1.50, "t2v-720": 1.55}),
+    Technique("vae-patch", "VAE-Patch-Parallel", GENERATOR, False, "t2v-720",
               {"vllm_omni": {"vae_patch_parallel": True}},
-              {"R256": 1.05, "R480": 1.10, "R720": 1.15}),
-    Technique("cfg-parallel", "CFG-Parallel (2 GPU)", GENERATOR, False, "R720",
+              {"t2i-1024": 1.05, "t2v-256": 1.08, "i2v-480": 1.12, "t2v-720": 1.18}),
+    Technique("cfg-parallel", "CFG-Parallel (2 GPU)", GENERATOR, False, "t2v-720",
               {"vllm_omni": {"cfg_parallel": True, "gpus": 2}},
-              {"R256": 1.80, "R480": 1.80, "R720": 1.80},
-              note="NVIDIA technique; uses a 2nd GPU — a scaling win, not per-GPU algorithmic."),
+              {"t2i-1024": 1.70, "t2v-256": 1.80, "i2v-480": 1.82, "t2v-720": 1.85},
+              note="NVIDIA technique; uses a 2nd GPU — a scaling win, not per-GPU algorithmic.",
+              scaling=True),
 ]
 
 _LADDERS: dict[str, list[Technique]] = {

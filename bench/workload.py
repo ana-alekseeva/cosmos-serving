@@ -55,17 +55,23 @@ REASONER_OPS: list[OperatingPoint] = [
                    clip_frames=16, clip_resolution="256p"),
 ]
 
-# Generator: resolution-based points (Part 1b).
+# Generator: task x resolution points (Part 1b). Different techniques dominate:
+# T2I is launch-bound (CUDA graphs); high-res video is denoise/decode-bound
+# (Cache-DiT, FP8, VAE-patch, CFG-Parallel). I2V ~= action-conditioned rollout (robot).
 GENERATOR_OPS: list[OperatingPoint] = [
-    OperatingPoint("R256", GENERATOR, "T2V 256p, 189 frames",
+    OperatingPoint("t2i-1024", GENERATOR, "T2I 1024px (image)",
+                   input_tokens=0, output_tokens=0, concurrency=1,
+                   modality="image", baseline_latency_ms=3_000.0,
+                   clip_frames=1, clip_resolution="1024px"),
+    OperatingPoint("t2v-256", GENERATOR, "T2V 256p, 189 frames",
                    input_tokens=0, output_tokens=0, concurrency=1,
                    modality="video", baseline_latency_ms=10_000.0,
                    clip_frames=189, clip_resolution="256p"),
-    OperatingPoint("R480", GENERATOR, "T2V 480p, 189 frames",
+    OperatingPoint("i2v-480", GENERATOR, "I2V 480p (action rollout)",
                    input_tokens=0, output_tokens=0, concurrency=1,
                    modality="video", baseline_latency_ms=84_000.0,
                    clip_frames=189, clip_resolution="480p"),
-    OperatingPoint("R720", GENERATOR, "T2V 720p, 189 frames",
+    OperatingPoint("t2v-720", GENERATOR, "T2V 720p, 189 frames",
                    input_tokens=0, output_tokens=0, concurrency=1,
                    modality="video", baseline_latency_ms=240_000.0,
                    clip_frames=189, clip_resolution="720p"),
