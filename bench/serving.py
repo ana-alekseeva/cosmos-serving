@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -57,6 +58,7 @@ def build_command(model: str, tower: str, techniques: list[Technique], port: int
 class ServerHandle:
     proc: subprocess.Popen
     base_url: str
+    log_path: str | None = None
 
     def close(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -75,10 +77,24 @@ def start_server(model: str, tower: str, techniques: list[Technique],
             "Install it with deploy/setup_gpu.sh, or use --backend mock locally."
         )
     cmd, _ = build_command(model, tower, techniques, port)
-    proc = subprocess.Popen(cmd)  # inherits stdout/stderr so vLLM logs are visible
-    handle = ServerHandle(proc, f"http://127.0.0.1:{port}")
-    _wait_healthy(handle.base_url, proc, ready_timeout)
+    log_path = tempfile.NamedTemporaryFile(prefix="vllm-serve-", suffix=".log", delete=False).name
+    log = open(log_path, "w")
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)  # captured, tailed on failure
+    handle = ServerHandle(proc, f"http://127.0.0.1:{port}", log_path)
+    try:
+        _wait_healthy(handle.base_url, proc, ready_timeout)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"{exc}\n  cmd: {' '.join(cmd)}\n  --- vllm log tail ({log_path}) ---\n{_tail(log_path)}"
+        ) from None
     return handle
+
+
+def _tail(path: str, n: int = 20) -> str:
+    try:
+        return "".join(open(path).readlines()[-n:]) or "(empty log)"
+    except OSError:
+        return "(log unavailable)"
 
 
 def _wait_healthy(base_url: str, proc: subprocess.Popen, timeout: int) -> None:

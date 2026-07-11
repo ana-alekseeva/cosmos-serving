@@ -57,14 +57,26 @@ def optimize_cmd(
     ops = [op_by_name(tower, op)] if op else ops_for(tower)
 
     if ablate:
-        result = run_ablation(tower, backend=backend, ops=ops, model=model, port=port)
-        from bench.plots import plot_contribution_waterfall  # lazy: needs matplotlib
-        png = plot_contribution_waterfall(result, out_dir / f"{tower}_waterfall.png")
         js = out_dir / f"{tower}_ablation.json"
         js.parent.mkdir(parents=True, exist_ok=True)
+
+        def _on_variant(res, v):  # persist partial JSON + log progress after each variant
+            js.write_text(json.dumps(res.to_dict(), indent=2))
+            cells = "  ".join(f"{o.name}={res.p50[(v.index, o.name)]:.0f}ms" for o in ops)
+            typer.echo(f"[{tower}] variant {v.index + 1}/{len(res.variants)} done — {v.label}: {cells}")
+
+        result = run_ablation(tower, backend=backend, ops=ops, model=model, port=port,
+                              on_variant=_on_variant)
+        from bench.plots import plot_contribution_waterfall  # lazy: needs matplotlib
+        png = plot_contribution_waterfall(result, out_dir / f"{tower}_waterfall.png")
         js.write_text(json.dumps(result.to_dict(), indent=2))
         if output == "text":
             print_summary(result)
+            if result.failed:
+                typer.echo(f"\n⚠ {len(result.failed)} variant(s) skipped — fix the flag in "
+                           f"bench/serving.py::_ENABLE_ARGS and re-run:")
+                for label, _ in result.failed:
+                    typer.echo(f"  - {label}")
             typer.echo(f"\nwaterfall -> {png}\nablation  -> {js}")
         else:
             _emit({**result.to_dict(), "waterfall": str(png), "ablation": str(js)}, output)

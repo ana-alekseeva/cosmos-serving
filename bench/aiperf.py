@@ -35,6 +35,7 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
         "--endpoint-type", "chat",                                  # VERIFY endpoint type
         "--synthetic-input-tokens-mean", str(op.input_tokens),
         "--output-tokens-mean", str(op.output_tokens),
+        "--extra-inputs", "ignore_eos:true",   # fixed output length -> comparable across variants
         "--concurrency", str(op.concurrency),
         "--request-count", str(request_count),
         "--warmup-request-count", str(warmup),

@@ -29,6 +29,7 @@ class AblationResult:
     variants: list[Variant]
     p50: dict = field(default_factory=dict)   # (variant_index, op_name) -> ms
     p95: dict = field(default_factory=dict)
+    failed: list = field(default_factory=list)  # [(variant_label, error_msg)] for skipped variants
 
     def latencies(self, op_name: str) -> list[float]:
         return [self.p50[(v.index, op_name)] for v in self.variants]
@@ -37,7 +38,10 @@ class AblationResult:
         """Per-variant rows with cumulative (vs V0) and marginal (vs prev) speedup."""
         rows, base, prev = [], None, None
         for v in self.variants:
-            ms = self.p50[(v.index, op_name)]
+            key = (v.index, op_name)
+            if key not in self.p50:
+                break                       # not measured yet (partial result)
+            ms = self.p50[key]
             base = ms if base is None else base
             vs0 = base / ms if ms else float("inf")
             vsp = (prev / ms) if (prev and ms) else 1.0
@@ -61,6 +65,7 @@ class AblationResult:
             "results": {
                 op.name: self.marginal_rows(op.name) for op in self.ops
             },
+            "failed": self.failed,
         }
 
 
@@ -71,7 +76,7 @@ def _baseline_label(tower: str) -> str:
 def run_ablation(tower: str, *, backend: str = "mock",
                  ops: list[OperatingPoint] | None = None,
                  repeats: int = 10, model: str | None = None,
-                 port: int = 8000) -> AblationResult:
+                 port: int = 8000, on_variant=None) -> AblationResult:
     ladder = ablation_ladder(tower)
     ops = ops or ops_for(tower)
 
@@ -89,8 +94,21 @@ def run_ablation(tower: str, *, backend: str = "mock",
                 m = engine.measure(op, repeats=repeats)
                 result.p50[(v.index, op.name)] = m.p50_ms
                 result.p95[(v.index, op.name)] = m.p95_ms
+        except Exception as exc:
+            for op in ops:                          # drop this variant's partial data
+                result.p50.pop((v.index, op.name), None)
+                result.p95.pop((v.index, op.name), None)
+            full = str(exc)
+            result.failed.append((v.label, full[:1500]))
+            hint = next((ln for ln in reversed(full.splitlines())
+                         if "error" in ln.lower() or "unrecognized" in ln.lower()),
+                        (full.splitlines() or [repr(exc)])[0])
+            print(f"  !! variant {v.index + 1}/{len(variants)} FAILED — {v.label}: {hint.strip()[:300]}")
+            continue                                # finally still closes the engine; on to next variant
         finally:
             engine.close()
+        if on_variant is not None:      # persist + report progress after each variant
+            on_variant(result, v)
     return result
 
 
