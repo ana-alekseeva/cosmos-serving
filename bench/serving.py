@@ -39,7 +39,7 @@ _MULTI_GPU = {"cfg-parallel", "context-parallel"}  # need 2 GPUs
 
 def build_command(model: str, tower: str, techniques: list[Technique], port: int) -> tuple[list[str], int]:
     keys = {t.key for t in techniques}
-    cmd = ["vllm", "serve", model, "--host", "0.0.0.0", "--port", str(port), "--init-timeout", "1800"]
+    cmd = ["vllm", "serve", model, "--host", "0.0.0.0", "--port", str(port)]
     if tower == GENERATOR:
         cmd.append("--omni")  # VERIFY: reasoner vs generator serve invocation
     # CUDA graphs are on by default in vLLM; force eager when NOT selected.
