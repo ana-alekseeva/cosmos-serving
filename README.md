@@ -73,3 +73,50 @@ and `bench/aiperf.py` against your installed vLLM / vLLM-Omni / AIPerf versions
 These were written from docs, not run on a GPU. Architectural techniques (paged
 attention, continuous batching) are always-on in vLLM — their contribution is read
 vs the eager baseline, not a toggle.
+
+## Deploy Cosmos on Nebius with the workbench (`npa`)
+
+An alternative to the manual `deploy/setup_gpu.sh` path: use Nebius's
+[`nebius-physical-ai`](https://github.com/nebius/nebius-physical-ai) workbench to stand
+up a managed Cosmos serving endpoint (provisioning, autoscaling, storage handled for
+you). This is the fastest way to *run* Cosmos; it is **separate** from the ablation
+harness above, which manages its own per-variant vLLM servers for measurement.
+
+**Install `npa`** (isolated uv tool):
+```bash
+uv tool install "git+https://github.com/nebius/nebius-physical-ai.git#subdirectory=npa"
+npa --version
+```
+
+**Authenticate to Nebius + configure the project:**
+```bash
+curl -fsSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash
+export PATH="${HOME}/.nebius/bin:${PATH}"
+npa configure --interactive      # creates/reuses the Nebius profile; prompts tenant/project/region/bucket
+export HF_TOKEN=hf_...            # gated Cosmos weights (accept the license on HF first)
+```
+
+**Deploy → serve → infer → tear down:**
+```bash
+# Verify source + weight access (unset GITHUB_TOKEN if 'source repo not reachable'):
+npa workbench cosmos -p <project-alias> -n cosmos check
+
+# Deploy a serverless serving endpoint on H200:
+npa workbench cosmos -p <project-alias> -n cosmos deploy \
+  --runtime serverless --gpu-type gpu-h200-sxm --gpu-preset <preset> --wait
+
+# Deploy leaves the model UNLOADED — load it before inference:
+npa workbench cosmos -p <project-alias> -n cosmos serve
+npa workbench cosmos -p <project-alias> -n cosmos status      # expect loaded: True
+
+# Generate (output lands in your bucket):
+npa workbench cosmos -p <project-alias> -n cosmos infer \
+  --prompt "A robot arm stacks colored cubes on a table" \
+  --output-path s3://<your-bucket>/cosmos/out/ --output-format json
+
+npa workbench cosmos -p <project-alias> -n cosmos teardown --yes   # stop billing
+```
+
+Confirm the exact `--gpu-preset` string via the Nebius console or `nebius compute platform list`.
+Note: the workbench's own `npa … cosmos optimize` is a roadmap placeholder (`not yet
+implemented`) — the optimization work in this repo is what fills that slot.
