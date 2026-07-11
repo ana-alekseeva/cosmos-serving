@@ -61,7 +61,7 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
         # annotate EVERY technique's marginal % drop vs the previous variant
         for i in range(1, len(lat)):
             drop = 100.0 * (1.0 - lat[i] / lat[i - 1]) if lat[i - 1] > 0 else 0.0
-            txt = f"-{drop:.0f}%" if drop >= 0.5 else "0%"
+            txt = f"-{drop:.0f}%" if drop >= 0.5 else (f"+{-drop:.0f}%" if drop <= -0.5 else "0%")
             ax.annotate(txt, (i, lat[i]), textcoords="offset points", xytext=(0, 4),
                         ha="center", fontsize=7, color=COLOR_ANNOT)
 

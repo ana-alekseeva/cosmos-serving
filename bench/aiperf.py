@@ -49,17 +49,18 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
 
 
 def _parse_aiperf(out_dir: Path) -> dict:
-    files = sorted(out_dir.glob("**/*.json"))
+    # the metrics file — NOT server_metrics_export.json (which has no request_latency)
+    files = list(out_dir.glob("**/profile_export_aiperf.json"))
     if not files:
-        raise FileNotFoundError(f"no AIPerf JSON export under {out_dir}")
-    data = json.loads(files[-1].read_text())
-    # VERIFY key names against the installed AIPerf export schema.
+        raise FileNotFoundError(f"no profile_export_aiperf.json under {out_dir}")
+    data = json.loads(files[0].read_text())
+    # AIPerf schema: request_latency = {unit, avg, p1..p99, min, max, std, count, sum}
     lat = data.get("request_latency", {})
-    ttft = data.get("time_to_first_token", {})
+    ttft = data.get("time_to_first_token", {})   # absent for non-streaming; unused downstream
     return {
         "p50_ms": float(lat.get("p50", 0.0)),
         "p95_ms": float(lat.get("p95", 0.0)),
-        "ttft_ms": float(ttft.get("p50", 0.0)),
+        "ttft_ms": float(ttft.get("p50", 0.0)) if isinstance(ttft, dict) else 0.0,
     }
 
 
