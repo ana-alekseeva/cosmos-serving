@@ -1,0 +1,27 @@
+[project]
+name = "cosmos-serving"
+version = "0.1.0"
+description = "Reproduce + attribute NVIDIA Cosmos 3 serving optimizations on Nebius, then improve latency."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# GPU / real backend — installed on the H200, not locally.
+# torch, vllm, vllm-omni, genai-perf are environment-specific: install per H200 setup.
+gpu = [
+    "mlflow>=2.14",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv]
+# Flat app layout (bench/ + optimize/ importable via cwd); don't build/install the project itself.
+package = false
