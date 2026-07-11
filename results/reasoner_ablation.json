@@ -1,0 +1,476 @@
+{
+  "tower": "reasoner",
+  "backend": "vllm",
+  "ops": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F"
+  ],
+  "variants": [
+    "R0 baseline",
+    "+ inference_mode",
+    "+ KV cache",
+    "+ deferred sampling sync",
+    "+ torch.compile / CUDA graphs",
+    "+ FlashAttention / fused attention",
+    "+ paged KV-cache",
+    "+ continuous batching",
+    "+ FP8 / NVFP4 quantization",
+    "+ EVS token pruning"
+  ],
+  "results": {
+    "A": [
+      {
+        "variant": "R0 baseline",
+        "ms": 573.0,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ inference_mode",
+        "ms": 635.8,
+        "vs_v0": 0.9,
+        "vs_prev": 0.9,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ KV cache",
+        "ms": 573.3,
+        "vs_v0": 1.0,
+        "vs_prev": 1.11,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ deferred sampling sync",
+        "ms": 600.7,
+        "vs_v0": 0.95,
+        "vs_prev": 0.95,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 179.5,
+        "vs_v0": 3.19,
+        "vs_prev": 3.35,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FlashAttention / fused attention",
+        "ms": 179.1,
+        "vs_v0": 3.2,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ paged KV-cache",
+        "ms": 179.1,
+        "vs_v0": 3.2,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching",
+        "ms": 179.2,
+        "vs_v0": 3.2,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 / NVFP4 quantization",
+        "ms": 131.6,
+        "vs_v0": 4.35,
+        "vs_prev": 1.36,
+        "lossy": true,
+        "scaling": false
+      }
+    ],
+    "B": [
+      {
+        "variant": "R0 baseline",
+        "ms": 9114.5,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ inference_mode",
+        "ms": 9595.1,
+        "vs_v0": 0.95,
+        "vs_prev": 0.95,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ KV cache",
+        "ms": 9128.8,
+        "vs_v0": 1.0,
+        "vs_prev": 1.05,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ deferred sampling sync",
+        "ms": 9519.5,
+        "vs_v0": 0.96,
+        "vs_prev": 0.96,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 2799.2,
+        "vs_v0": 3.26,
+        "vs_prev": 3.4,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FlashAttention / fused attention",
+        "ms": 2798.8,
+        "vs_v0": 3.26,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ paged KV-cache",
+        "ms": 2796.7,
+        "vs_v0": 3.26,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching",
+        "ms": 2798.5,
+        "vs_v0": 3.26,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 / NVFP4 quantization",
+        "ms": 2033.5,
+        "vs_v0": 4.48,
+        "vs_prev": 1.38,
+        "lossy": true,
+        "scaling": false
+      }
+    ],
+    "C": [
+      {
+        "variant": "R0 baseline",
+        "ms": 2010.2,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ inference_mode",
+        "ms": 2062.4,
+        "vs_v0": 0.97,
+        "vs_prev": 0.97,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ KV cache",
+        "ms": 2030.4,
+        "vs_v0": 0.99,
+        "vs_prev": 1.02,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ deferred sampling sync",
+        "ms": 2161.7,
+        "vs_v0": 0.93,
+        "vs_prev": 0.94,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 702.3,
+        "vs_v0": 2.86,
+        "vs_prev": 3.08,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FlashAttention / fused attention",
+        "ms": 691.7,
+        "vs_v0": 2.91,
+        "vs_prev": 1.02,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ paged KV-cache",
+        "ms": 693.1,
+        "vs_v0": 2.9,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching",
+        "ms": 698.7,
+        "vs_v0": 2.88,
+        "vs_prev": 0.99,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 / NVFP4 quantization",
+        "ms": 570.7,
+        "vs_v0": 3.52,
+        "vs_prev": 1.22,
+        "lossy": true,
+        "scaling": false
+      }
+    ],
+    "D": [
+      {
+        "variant": "R0 baseline",
+        "ms": 971.9,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ inference_mode",
+        "ms": 997.4,
+        "vs_v0": 0.97,
+        "vs_prev": 0.97,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ KV cache",
+        "ms": 976.1,
+        "vs_v0": 1.0,
+        "vs_prev": 1.02,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ deferred sampling sync",
+        "ms": 1003.3,
+        "vs_v0": 0.97,
+        "vs_prev": 0.97,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 399.6,
+        "vs_v0": 2.43,
+        "vs_prev": 2.51,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FlashAttention / fused attention",
+        "ms": 398.7,
+        "vs_v0": 2.44,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ paged KV-cache",
+        "ms": 398.7,
+        "vs_v0": 2.44,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching",
+        "ms": 398.9,
+        "vs_v0": 2.44,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 / NVFP4 quantization",
+        "ms": 316.9,
+        "vs_v0": 3.07,
+        "vs_prev": 1.26,
+        "lossy": true,
+        "scaling": false
+      }
+    ],
+    "E": [
+      {
+        "variant": "R0 baseline",
+        "ms": 902.7,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ inference_mode",
+        "ms": 931.2,
+        "vs_v0": 0.97,
+        "vs_prev": 0.97,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ KV cache",
+        "ms": 901.8,
+        "vs_v0": 1.0,
+        "vs_prev": 1.03,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ deferred sampling sync",
+        "ms": 978.7,
+        "vs_v0": 0.92,
+        "vs_prev": 0.92,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 313.7,
+        "vs_v0": 2.88,
+        "vs_prev": 3.12,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FlashAttention / fused attention",
+        "ms": 313.6,
+        "vs_v0": 2.88,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ paged KV-cache",
+        "ms": 313.4,
+        "vs_v0": 2.88,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching",
+        "ms": 313.2,
+        "vs_v0": 2.88,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 / NVFP4 quantization",
+        "ms": 254.2,
+        "vs_v0": 3.55,
+        "vs_prev": 1.23,
+        "lossy": true,
+        "scaling": false
+      }
+    ],
+    "F": [
+      {
+        "variant": "R0 baseline",
+        "ms": 4218.4,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ inference_mode",
+        "ms": 4189.1,
+        "vs_v0": 1.01,
+        "vs_prev": 1.01,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ KV cache",
+        "ms": 4215.0,
+        "vs_v0": 1.0,
+        "vs_prev": 0.99,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ deferred sampling sync",
+        "ms": 4239.0,
+        "vs_v0": 1.0,
+        "vs_prev": 0.99,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 3658.6,
+        "vs_v0": 1.15,
+        "vs_prev": 1.16,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FlashAttention / fused attention",
+        "ms": 3671.0,
+        "vs_v0": 1.15,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ paged KV-cache",
+        "ms": 3673.8,
+        "vs_v0": 1.15,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching",
+        "ms": 3675.9,
+        "vs_v0": 1.15,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 / NVFP4 quantization",
+        "ms": 2704.7,
+        "vs_v0": 1.56,
+        "vs_prev": 1.36,
+        "lossy": true,
+        "scaling": false
+      }
+    ]
+  },
+  "failed": [
+    [
+      "+ EVS token pruning",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --enable-evs --quantization fp8\n  --- vllm log tail (/tmp/vllm-serve-y9j72h36.log) ---\nINFO 07-11 22:23:11 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nusage: vllm [-h] [-v]\n            {chat,complete,serve,launch,bench,collect-env,run-batch} ...\nvllm: error: unrecognized arguments: --enable-evs\n"
+    ]
+  ]
+}

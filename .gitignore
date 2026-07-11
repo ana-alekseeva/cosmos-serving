@@ -1,8 +1,5 @@
 .venv/
 __pycache__/
 *.pyc
-results/*.png
-results/*.json
-!results/.gitkeep
 .DS_Store
 .pytest_cache/
