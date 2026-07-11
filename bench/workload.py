@@ -71,10 +71,12 @@ GENERATOR_OPS: list[OperatingPoint] = [
                    input_tokens=0, output_tokens=0, concurrency=1,
                    modality="video", baseline_latency_ms=84_000.0,
                    clip_frames=189, clip_resolution="480p"),
-    OperatingPoint("t2v-720", GENERATOR, "T2V 720p, 189 frames",
-                   input_tokens=0, output_tokens=0, concurrency=1,
-                   modality="video", baseline_latency_ms=240_000.0,
-                   clip_frames=189, clip_resolution="720p"),
+    # t2v-720 disabled to cut generator ablation runtime (~1.5-2h; ~240 s/clip baseline).
+    # Re-enable for the final headline run — registry keeps its t2v-720 speedups ready.
+    # OperatingPoint("t2v-720", GENERATOR, "T2V 720p, 189 frames",
+    #                input_tokens=0, output_tokens=0, concurrency=1,
+    #                modality="video", baseline_latency_ms=240_000.0,
+    #                clip_frames=189, clip_resolution="720p"),
 ]
 
 _OPS: dict[str, list[OperatingPoint]] = {

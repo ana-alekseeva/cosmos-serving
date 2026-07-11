@@ -70,7 +70,8 @@ def _baseline_label(tower: str) -> str:
 
 def run_ablation(tower: str, *, backend: str = "mock",
                  ops: list[OperatingPoint] | None = None,
-                 repeats: int = 10) -> AblationResult:
+                 repeats: int = 10, model: str | None = None,
+                 port: int = 8000) -> AblationResult:
     ladder = ablation_ladder(tower)
     ops = ops or ops_for(tower)
 
@@ -80,11 +81,16 @@ def run_ablation(tower: str, *, backend: str = "mock",
 
     result = AblationResult(tower=tower, backend=backend, ops=ops, variants=variants)
     for v in variants:
-        engine = make_engine(backend, list(v.enabled))
-        for op in ops:
-            m = engine.measure(op, repeats=repeats)
-            result.p50[(v.index, op.name)] = m.p50_ms
-            result.p95[(v.index, op.name)] = m.p95_ms
+        # server config depends on the technique set: one server per variant, reused
+        # across ops, then torn down before the next variant relaunches (real backend).
+        engine = make_engine(backend, list(v.enabled), tower=tower, model=model, port=port)
+        try:
+            for op in ops:
+                m = engine.measure(op, repeats=repeats)
+                result.p50[(v.index, op.name)] = m.p50_ms
+                result.p95[(v.index, op.name)] = m.p95_ms
+        finally:
+            engine.close()
     return result
 
 

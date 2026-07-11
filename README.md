@@ -47,8 +47,29 @@ GPU environment).
 | `bench/equivalence.py` | Part-2 lossless checks (token/latent/SSIM) |
 | `workflows/cosmos3-optimize.yaml` | `npa.workflow/v0.0.1` twin (`toolRef: workbench.cosmos3.optimize`) |
 
-## Next (on the H200)
+## Real backend (on the H200)
 
-Wire `VLLMEngine.measure` and `optimize/techniques/*.apply` to launch vLLM /
-vLLM-Omni with each toggle's `engine_flags` and measure via GenAI-Perf / vLLM
-bench. The registry, ablation, plots, and CLI stay unchanged.
+The real path is implemented (`--backend vllm`): the harness launches a vLLM
+(Reasoner) / vLLM-Omni (Generator) server per ablation variant, measures each OP
+via **AIPerf** (Reasoner) or a timed generation request (Generator), then tears the
+server down before the next variant.
+
+```bash
+bash deploy/setup_gpu.sh          # deps + weights access (one-time)
+uv run python -m optimize.cli --tower reasoner  --ablate --backend vllm --out-dir results
+uv run python -m optimize.cli --tower generator --ablate --backend vllm --out-dir results
+```
+
+| Piece | File |
+|---|---|
+| server launch / teardown + flag mapping | `bench/serving.py` |
+| AIPerf (reasoner) + timed generation (generator) | `bench/aiperf.py` |
+| `VLLMEngine.measure()` / `close()` | `bench/drivers.py` |
+| H200 setup | `deploy/setup_gpu.sh` |
+
+**Before trusting the numbers**, confirm every `# VERIFY` marker in `bench/serving.py`
+and `bench/aiperf.py` against your installed vLLM / vLLM-Omni / AIPerf versions
+(CLI flag names, generation endpoint/payload, AIPerf JSON schema, multimodal input).
+These were written from docs, not run on a GPU. Architectural techniques (paged
+attention, continuous batching) are always-on in vLLM — their contribution is read
+vs the eager baseline, not a toggle.

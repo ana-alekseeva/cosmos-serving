@@ -11,8 +11,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# GPU / real backend — installed on the H200, not locally.
-# torch, vllm, vllm-omni, genai-perf are environment-specific: install per H200 setup.
+# GPU / real backend — installed on the H200, not locally (see deploy/setup_gpu.sh).
+# torch, vllm, vllm-omni, aiperf are environment-specific; install on-box, not via this extra.
 gpu = [
     "mlflow>=2.14",
 ]

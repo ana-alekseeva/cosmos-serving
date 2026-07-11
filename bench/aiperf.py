@@ -1,0 +1,94 @@
+"""Benchmark drivers for the real backend.
+
+- Reasoner: NVIDIA **AIPerf** against the OpenAI-compatible endpoint, matching
+  inference_benchmarks.md (fixed input/output tokens, concurrency, TTFT/latency).
+- Generator: a timed generation request (wall-clock seconds/clip), matching the
+  Generator methodology (diffusion has no tokens/s).
+
+NOT yet run on-box. Every `# VERIFY` (AIPerf CLI flags, JSON schema, generation
+endpoint/payload, multimodal inputs) must be confirmed against installed versions.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import statistics
+import subprocess
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
+
+from bench.workload import OperatingPoint
+
+
+def run_aiperf(base_url: str, model: str, op: OperatingPoint,
+               *, warmup: int = 2, request_count: int = 50) -> dict:
+    """Reasoner latency via AIPerf at the OP's fixed shape + concurrency."""
+    if shutil.which("aiperf") is None:
+        raise RuntimeError("`aiperf` not found — install it on the GPU host (deploy/setup_gpu.sh).")
+    out_dir = Path(tempfile.mkdtemp(prefix="aiperf-"))
+    cmd = [
+        "aiperf", "profile",
+        "--model", model,
+        "--url", base_url,
+        "--endpoint-type", "chat",                                  # VERIFY endpoint type
+        "--synthetic-input-tokens-mean", str(op.input_tokens),
+        "--output-tokens-mean", str(op.output_tokens),
+        "--concurrency", str(op.concurrency),
+        "--request-count", str(request_count),
+        "--warmup-request-count", str(warmup),
+        "--artifact-dir", str(out_dir),
+    ]
+    if op.modality != "text":
+        # VERIFY: multimodal (image/video) input needs AIPerf media config or a fixed
+        # sample clip; synthetic text tokens alone won't exercise the ViT / EVS path.
+        cmd += ["--image-width-mean", "256", "--image-height-mean", "256"]
+    subprocess.run(cmd, check=True)
+    return _parse_aiperf(out_dir)
+
+
+def _parse_aiperf(out_dir: Path) -> dict:
+    files = sorted(out_dir.glob("**/*.json"))
+    if not files:
+        raise FileNotFoundError(f"no AIPerf JSON export under {out_dir}")
+    data = json.loads(files[-1].read_text())
+    # VERIFY key names against the installed AIPerf export schema.
+    lat = data.get("request_latency", {})
+    ttft = data.get("time_to_first_token", {})
+    return {
+        "p50_ms": float(lat.get("p50", 0.0)),
+        "p95_ms": float(lat.get("p95", 0.0)),
+        "ttft_ms": float(ttft.get("p50", 0.0)),
+    }
+
+
+def time_generation_request(base_url: str, model: str, op: OperatingPoint,
+                            *, repeats: int = 5, warmup: int = 1) -> dict:
+    """Generator latency: wall-clock per clip over `repeats` (fixed prompt/seed)."""
+    payload = json.dumps({
+        "model": model,
+        "prompt": "a robot arm picking up a red cube on a table",   # fixed prompt/seed
+        "seed": 0,
+        "resolution": op.clip_resolution,                            # VERIFY payload schema
+        "num_frames": op.clip_frames,
+    }).encode()
+
+    def _one() -> None:
+        req = urllib.request.Request(f"{base_url}/v1/generate",       # VERIFY endpoint path
+                                     data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=3600) as r:
+            r.read()
+
+    for _ in range(warmup):
+        _one()
+    samples_ms: list[float] = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        _one()
+        samples_ms.append((time.perf_counter() - t0) * 1e3)
+
+    samples_ms.sort()
+    p95 = samples_ms[min(len(samples_ms) - 1, round(0.95 * (len(samples_ms) - 1)))]
+    return {"p50_ms": statistics.median(samples_ms), "p95_ms": p95}

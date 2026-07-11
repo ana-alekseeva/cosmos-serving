@@ -43,6 +43,8 @@ def optimize_cmd(
     ablate: bool = typer.Option(False, "--ablate", help="run the cumulative ladder + waterfall"),
     backend: str = typer.Option("mock", "--backend", help="mock | vllm"),
     op: str = typer.Option(None, "--op", help="restrict to a single operating point"),
+    model: str = typer.Option(None, "--model", help="HF model id (default nvidia/Cosmos3-Nano)"),
+    port: int = typer.Option(8000, "--port", help="server port (vllm backend)"),
     out_dir: Path = typer.Option(Path("results"), "--out-dir", help="artifact directory"),
     output: str = typer.Option("text", "--output", help="text | json"),
 ) -> None:
@@ -55,7 +57,7 @@ def optimize_cmd(
     ops = [op_by_name(tower, op)] if op else ops_for(tower)
 
     if ablate:
-        result = run_ablation(tower, backend=backend, ops=ops)
+        result = run_ablation(tower, backend=backend, ops=ops, model=model, port=port)
         from bench.plots import plot_contribution_waterfall  # lazy: needs matplotlib
         png = plot_contribution_waterfall(result, out_dir / f"{tower}_waterfall.png")
         js = out_dir / f"{tower}_ablation.json"
@@ -75,8 +77,11 @@ def optimize_cmd(
     except ValueError as exc:
         _fail(str(exc))
 
-    engine = make_engine(backend, enabled)
-    measured = {o.name: engine.measure(o).as_dict() for o in ops}
+    engine = make_engine(backend, enabled, tower=tower, model=model, port=port)
+    try:
+        measured = {o.name: engine.measure(o).as_dict() for o in ops}
+    finally:
+        engine.close()
     lossy = [t.key for t in enabled if t.lossy]
     lines = [
         f"tower={tower} backend={backend} "

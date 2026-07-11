@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 
 from bench.workload import OperatingPoint
-from optimize.registry import Technique
+from optimize.registry import GENERATOR, REASONER, Technique
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class MockEngine:
 
     backend = "mock"
 
-    def __init__(self, enabled: list[Technique]):
+    def __init__(self, enabled: list[Technique], **_):
         self.enabled = list(enabled)
 
     def measure(self, op: OperatingPoint, repeats: int = 10, warmup: int = 1) -> Measurement:
@@ -40,31 +40,62 @@ class MockEngine:
         # deterministic p95 spread so downstream code exercises both fields
         return Measurement(op.name, round(latency, 3), round(latency * 1.05, 3))
 
+    def close(self) -> None:
+        pass
+
 
 class VLLMEngine:
-    """Real backend — not yet wired. Runs on the H200 in Phase 1."""
+    """Real backend: launch vLLM/vLLM-Omni with the technique set, measure per OP.
+
+    Server config is a function of the technique set (not the OP), so the server is
+    started lazily on first measure() and reused for every OP of the variant; the
+    ablation runner calls close() between variants to free the GPU and relaunch with
+    the next flag set. Reasoner -> AIPerf; Generator -> timed generation request.
+    """
 
     backend = "vllm"
 
-    def __init__(self, enabled: list[Technique]):
+    def __init__(self, enabled: list[Technique], *, tower: str = REASONER,
+                 model: str | None = None, port: int = 8000):
         self.enabled = list(enabled)
+        self.tower = tower
+        self.model = model
+        self.port = port
+        self._server = None
+
+    def _ensure_server(self):
+        if self._server is None:
+            from bench.serving import DEFAULT_MODEL, start_server
+            model = self.model or DEFAULT_MODEL
+            self._server = start_server(model, self.tower, self.enabled, port=self.port)
+        return self._server
 
     def measure(self, op: OperatingPoint, repeats: int = 10, warmup: int = 1) -> Measurement:
-        flags = [t.engine_flags for t in self.enabled]
-        raise NotImplementedError(
-            "Real vLLM backend not wired yet (Phase 1 on the H200). "
-            "Launch vLLM/vLLM-Omni with these flags then measure via GenAI-Perf / "
-            f"vLLM bench:\n  op={op.name} flags={flags}"
-        )
+        server = self._ensure_server()
+        model = self.model or "nvidia/Cosmos3-Nano"
+        if self.tower == GENERATOR:
+            from bench.aiperf import time_generation_request
+            r = time_generation_request(server.base_url, model, op,
+                                         repeats=max(3, repeats // 2), warmup=warmup)
+        else:
+            from bench.aiperf import run_aiperf
+            r = run_aiperf(server.base_url, model, op, warmup=warmup, request_count=max(30, repeats))
+        return Measurement(op.name, round(r["p50_ms"], 3), round(r["p95_ms"], 3))
+
+    def close(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            self._server = None
 
 
 _ENGINES = {"mock": MockEngine, "vllm": VLLMEngine}
 
 
-def make_engine(backend: str, enabled: list[Technique]):
+def make_engine(backend: str, enabled: list[Technique], *, tower: str = REASONER,
+                model: str | None = None, port: int = 8000):
     if backend not in _ENGINES:
         raise ValueError(f"unknown backend {backend!r}; expected one of {sorted(_ENGINES)}")
-    return _ENGINES[backend](enabled)
+    return _ENGINES[backend](enabled, tower=tower, model=model, port=port)
 
 
 def time_generation(loop_fn, *, warmup: int = 1, repeats: int = 10) -> Measurement:
