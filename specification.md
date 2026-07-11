@@ -28,7 +28,7 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
   - **Generator** (diffusion, MoT) — slow: ~108 s (Nano 720p, 1× B200); ~240 s on 1× H200. Served by **vLLM-Omni**. Runs on **2× H200** (to enable CFG-Parallel).
 - **NVIDIA's shipped techniques = what Part 1 reproduces & attributes** (each a toggle in `optimize`):
   - *Reasoner:* KV cache, deferred sampling sync, torch.compile + CUDA graphs, fused/Flash attention, paged KV-cache, continuous batching, FP8/NVFP4 quantization, **EVS** (Efficient Video Sampling — token pruning for video inputs).
-  - *Generator:* reasoner-tower output caching, torch.compile + CUDA graphs, **CFG-Parallel** (cond/uncond on 2 GPUs), Cache-DiT, FP8 quant, VAE-Patch-Parallel. (Ulysses CP / HSDP / CPU offload remain out of scope.)
+  - *Generator:* reasoner-tower output caching, torch.compile + CUDA graphs, **CFG-Parallel** (cond/uncond on 2 GPUs), **Ulysses Context-Parallel** (alt 2-GPU strategy), Cache-DiT, FP8 quant, VAE-Patch-Parallel, request batching, **HSDP** + **CPU offload** (memory). All are selectable toggles; the latency waterfall shows only the latency-reducing subset (see §6).
 - **Part-2 new techniques:** 1–2 only, **lossless preferred** (any lossy one gets a quality guard). Candidates picked from the Part-1 breakdown (§14).
 
 ### Open-source components to reproduce
@@ -57,7 +57,7 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
 
 ### Non-goals
 - Training / fine-tuning.
-- Distributed inference beyond CFG-Parallel (Ulysses CP, HSDP, CPU offload).
+- Stacking two distributed strategies at once (CFG-Parallel × Context-Parallel needs ≥4 GPUs; on 2× H200 they are mutually-exclusive alternatives).
 - Chasing quality-benchmark leaderboards (Physics-IQ / RoboLab / VANTAGE-Bench) — small correctness guards only, never the working loop.
 
 ---
@@ -142,19 +142,21 @@ Cumulative order for the waterfall; the `optimize` interface still allows any su
 *R0–R5 cleanest in the readable eager path; R6+ in the vLLM engine (architectural ones attributed engine-vs-eager). Waterfall stitches both.*
 
 ### Generator ladder (Part 1b) — 2× H200
-| # | + technique | Notes |
-|---|---|---|
-| G0 | naïve PyTorch reference | recompute conditioning each step |
-| G1 | + **reasoner-tower output caching** | conditioning once |
-| G2 | + **torch.compile / CUDA graphs** | host overhead |
-| G3 | + **CFG baseline** (2 sequential forwards, 1 GPU) | the CFG cost |
-| G4 | + **Cache-DiT** *(lossy→guard)* | skip redundant block compute |
-| G5 | + **FP8 quant** *(lossy→guard)* | memory-bound denoise |
-| G6 | + **VAE-Patch-Parallel** | shrinks decode tail |
-| G7 | + **CFG-Parallel (2 GPU)** — cond on GPU0, uncond on GPU1, 1 P2P/step | **NVIDIA's technique; end of Part 1.** Note: G7's bar reflects adding a 2nd GPU (a scaling technique), label accordingly. |
-| **P2** | **+ 1–2 NEW techniques (Part 2)** | picked from the breakdown; lossless preferred (§14) |
+Cumulative **latency waterfall** (baseline recomputes conditioning + sequential CFG):
+| # | + technique | Category | Notes |
+|---|---|---|---|
+| G0 | naïve PyTorch reference | — | recompute conditioning, sequential CFG |
+| G1 | + **reasoner-tower output caching** | latency | conditioning once |
+| G2 | + **torch.compile / CUDA graphs** | latency | host overhead (biggest on T2I) |
+| G3 | + **Cache-DiT** *(lossy→guard)* | latency | skip redundant block compute |
+| G4 | + **FP8 quant** *(lossy→guard)* | latency | memory-bound denoise |
+| G5 | + **VAE-Patch-Parallel** | latency | shrinks decode tail |
+| G6 | + **request batching** | throughput | flat at B=1 (no latency benefit) |
+| G7 | + **CFG-Parallel (2 GPU)** | scaling | NVIDIA's; bar = adding a 2nd GPU, labeled as scaling. **End of Part 1.** |
+| **P2** | **+ 1–2 NEW techniques (Part 2)** | — | picked from the breakdown; lossless preferred (§14) |
 
-*Excluded: Ulysses CP, HSDP, CPU offload.*
+Selectable but **off the latency waterfall** (in `--preset full` / `--enable`, not the ablation):
+**Ulysses Context-Parallel** (alt 2-GPU strategy, mutually exclusive with CFG-Parallel), **HSDP** + **CPU offload** (memory-reduction; CPU offload *adds* latency).
 
 ---
 
