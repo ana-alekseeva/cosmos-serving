@@ -77,8 +77,12 @@ def optimize_cmd(
         if output == "text":
             print_summary(result)
             if result.failed:
-                typer.echo(f"\n⚠ {len(result.failed)} variant(s) skipped — fix the flag in "
-                           f"bench/serving.py::_ENABLE_ARGS and re-run:")
+                fix = {
+                    "eager": "install the missing package on the GPU host (e.g. flash-attn "
+                             "for FlashAttention, or the fp8 quant deps) — see bench/eager.py — and re-run",
+                    "vllm": "fix the flag in bench/serving.py::_ENABLE_ARGS and re-run",
+                }.get(backend, "resolve the error above and re-run")
+                typer.echo(f"\n⚠ {len(result.failed)} variant(s) skipped — {fix}:")
                 for label, _ in result.failed:
                     typer.echo(f"  - {label}")
             typer.echo(f"\nwaterfall  -> {png}\nablation   -> {js}\nfull trace -> {js_full}")
