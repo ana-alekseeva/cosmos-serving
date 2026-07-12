@@ -24,7 +24,7 @@ def test_resolve_selection():
     assert resolve(REASONER, preset="none") == []
     assert resolve(REASONER, preset="full") == techniques_for(REASONER)  # no groups -> all
     # --enable returns ladder order, not argument order
-    assert [t.key for t in resolve(REASONER, enable=["fp8", "kv-cache"])] == ["kv-cache", "fp8"]
+    assert [t.key for t in resolve(REASONER, enable=["fp8", "cuda-graphs"])] == ["cuda-graphs", "fp8"]
     with pytest.raises(ValueError):
         resolve(REASONER, enable=["bogus"])
 

@@ -77,8 +77,10 @@ def run_ablation(tower: str, *, backend: str = "mock",
                  ops: list[OperatingPoint] | None = None,
                  repeats: int = 10, model: str | None = None,
                  port: int = 8000, on_variant=None) -> AblationResult:
-    ladder = ablation_ladder(tower)
+    ladder = ablation_ladder(tower, backend)
     ops = ops or ops_for(tower)
+    if backend == "eager":
+        ops = [op for op in ops if op.concurrency == 1]   # eager is single-request only (skip C/F)
 
     variants = [Variant(0, _baseline_label(tower), None, ())]
     for i, tech in enumerate(ladder, start=1):

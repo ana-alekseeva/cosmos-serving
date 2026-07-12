@@ -1,0 +1,219 @@
+{
+  "tower": "generator",
+  "backend": "mock",
+  "ops": [
+    "t2i-1024",
+    "t2v-256",
+    "i2v-480"
+  ],
+  "variants": [
+    "G0 baseline",
+    "+ reasoner-tower output caching",
+    "+ torch.compile / CUDA graphs",
+    "+ Cache-DiT",
+    "+ FP8 quantization",
+    "+ VAE-Patch-Parallel",
+    "+ request batching (seq-packing)",
+    "+ CFG-Parallel (2 GPU)"
+  ],
+  "results": {
+    "t2i-1024": [
+      {
+        "variant": "G0 baseline",
+        "ms": 3000.0,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 2608.7,
+        "vs_v0": 1.15,
+        "vs_prev": 1.15,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 1683.0,
+        "vs_v0": 1.78,
+        "vs_prev": 1.55,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ Cache-DiT",
+        "ms": 1402.5,
+        "vs_v0": 2.14,
+        "vs_prev": 1.2,
+        "lossy": true,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 quantization",
+        "ms": 1001.8,
+        "vs_v0": 2.99,
+        "vs_prev": 1.4,
+        "lossy": true,
+        "scaling": false
+      },
+      {
+        "variant": "+ VAE-Patch-Parallel",
+        "ms": 954.1,
+        "vs_v0": 3.14,
+        "vs_prev": 1.05,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ request batching (seq-packing)",
+        "ms": 954.1,
+        "vs_v0": 3.14,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ CFG-Parallel (2 GPU)",
+        "ms": 561.2,
+        "vs_v0": 5.35,
+        "vs_prev": 1.7,
+        "lossy": false,
+        "scaling": true
+      }
+    ],
+    "t2v-256": [
+      {
+        "variant": "G0 baseline",
+        "ms": 10000.0,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 9090.9,
+        "vs_v0": 1.1,
+        "vs_prev": 1.1,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 7272.7,
+        "vs_v0": 1.38,
+        "vs_prev": 1.25,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ Cache-DiT",
+        "ms": 5387.2,
+        "vs_v0": 1.86,
+        "vs_prev": 1.35,
+        "lossy": true,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 quantization",
+        "ms": 3715.3,
+        "vs_v0": 2.69,
+        "vs_prev": 1.45,
+        "lossy": true,
+        "scaling": false
+      },
+      {
+        "variant": "+ VAE-Patch-Parallel",
+        "ms": 3440.1,
+        "vs_v0": 2.91,
+        "vs_prev": 1.08,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ request batching (seq-packing)",
+        "ms": 3440.1,
+        "vs_v0": 2.91,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ CFG-Parallel (2 GPU)",
+        "ms": 1911.2,
+        "vs_v0": 5.23,
+        "vs_prev": 1.8,
+        "lossy": false,
+        "scaling": true
+      }
+    ],
+    "i2v-480": [
+      {
+        "variant": "G0 baseline",
+        "ms": 84000.0,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 77777.8,
+        "vs_v0": 1.08,
+        "vs_prev": 1.08,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 70707.1,
+        "vs_v0": 1.19,
+        "vs_prev": 1.1,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ Cache-DiT",
+        "ms": 47138.0,
+        "vs_v0": 1.78,
+        "vs_prev": 1.5,
+        "lossy": true,
+        "scaling": false
+      },
+      {
+        "variant": "+ FP8 quantization",
+        "ms": 31425.4,
+        "vs_v0": 2.67,
+        "vs_prev": 1.5,
+        "lossy": true,
+        "scaling": false
+      },
+      {
+        "variant": "+ VAE-Patch-Parallel",
+        "ms": 28058.4,
+        "vs_v0": 2.99,
+        "vs_prev": 1.12,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ request batching (seq-packing)",
+        "ms": 28058.4,
+        "vs_v0": 2.99,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ CFG-Parallel (2 GPU)",
+        "ms": 15416.7,
+        "vs_v0": 5.45,
+        "vs_prev": 1.82,
+        "lossy": false,
+        "scaling": true
+      }
+    ]
+  }
+}

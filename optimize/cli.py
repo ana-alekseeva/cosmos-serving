@@ -41,7 +41,7 @@ def optimize_cmd(
     preset: str = typer.Option(None, "--preset", help="none | full"),
     enable: str = typer.Option(None, "--enable", help="comma-separated technique keys"),
     ablate: bool = typer.Option(False, "--ablate", help="run the cumulative ladder + waterfall"),
-    backend: str = typer.Option("mock", "--backend", help="mock | vllm"),
+    backend: str = typer.Option("mock", "--backend", help="mock | vllm | eager"),
     op: str = typer.Option(None, "--op", help="restrict to a single operating point"),
     model: str = typer.Option(None, "--model", help="HF model id (default nvidia/Cosmos3-Nano)"),
     port: int = typer.Option(8000, "--port", help="server port (vllm backend)"),

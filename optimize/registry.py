@@ -38,35 +38,30 @@ class Technique:
 # Reasoner ladder (Part 1a) — canonical cumulative order.
 # op names: A (latency), B (decode), C (throughput), D (multimodal / robot).
 # ---------------------------------------------------------------------------
+# The naive vLLM baseline DISABLES each default-on knob (--enforce-eager, SDPA attention,
+# --no-enable-prefix-caching, --no-enable-chunked-prefill, --max-num-seqs 1); each technique
+# re-enables exactly one. See bench/serving.py::build_command. Mock speedups are anchored to
+# the real H200 measurements where we have them (cuda-graphs, fp8).
 REASONER_TECHNIQUES: list[Technique] = [
-    Technique("inference-mode", "inference_mode", REASONER, False, "A",
-              {"eager": {"inference_mode": True}},
-              {"A": 1.10, "B": 1.10, "C": 1.05, "D": 1.08, "E": 1.08, "F": 1.06}),
-    Technique("kv-cache", "KV cache", REASONER, False, "B",
-              {"eager": {"use_cache": True}},
-              {"A": 2.50, "B": 6.00, "C": 2.00, "D": 1.50, "E": 1.50, "F": 1.60}),
-    Technique("deferred-sync", "deferred sampling sync", REASONER, False, "A",
-              {"eager": {"defer_sync": True}},
-              {"A": 1.30, "B": 1.15, "C": 1.05, "D": 1.05, "E": 1.05, "F": 1.05}),
-    Technique("cuda-graphs", "torch.compile / CUDA graphs", REASONER, False, "A",
+    Technique("cuda-graphs", "torch.compile + CUDA graphs", REASONER, False, "A",
               {"vllm": {"enforce_eager": False}},
-              {"A": 1.60, "B": 1.15, "C": 1.10, "D": 1.10, "E": 1.15, "F": 1.10}),
-    Technique("flash-attn", "FlashAttention / fused attention", REASONER, False, "A",
-              {"vllm": {"attention_backend": "FLASH_ATTN"}},
-              {"A": 1.20, "B": 1.50, "C": 1.30, "D": 1.40, "E": 1.35, "F": 1.40}),
-    Technique("paged-kv", "paged KV-cache", REASONER, False, "C",
-              {"vllm": {"__architectural__": "paged_attention"}},
-              {"A": 1.05, "B": 1.20, "C": 1.50, "D": 1.10, "E": 1.10, "F": 1.50}),
-    Technique("continuous-batching", "continuous batching", REASONER, False, "C",
-              {"vllm": {"__architectural__": "continuous_batching"}},
-              {"A": 1.00, "B": 1.00, "C": 2.50, "D": 1.10, "E": 1.00, "F": 2.50},
+              {"A": 3.35, "B": 3.40, "C": 3.08, "D": 2.51, "E": 3.12, "F": 1.16}),
+    Technique("flash-attn", "FlashAttention (vs SDPA)", REASONER, False, "B",
+              {"env": {"VLLM_ATTENTION_BACKEND": "FLASH_ATTN"}},
+              {"A": 1.20, "B": 1.60, "C": 1.40, "D": 1.50, "E": 1.40, "F": 1.50}),
+    Technique("prefix-caching", "prefix caching", REASONER, False, "C",
+              {"vllm": {"enable_prefix_caching": True}},
+              {"A": 1.02, "B": 1.02, "C": 1.05, "D": 1.02, "E": 1.02, "F": 1.05}),
+    Technique("chunked-prefill", "chunked prefill", REASONER, False, "D",
+              {"vllm": {"enable_chunked_prefill": True}},
+              {"A": 1.05, "B": 1.05, "C": 1.10, "D": 1.20, "E": 1.15, "F": 1.20}),
+    Technique("continuous-batching", "continuous batching (max-num-seqs)", REASONER, False, "C",
+              {"vllm": {"max_num_seqs": ">1"}},
+              {"A": 1.00, "B": 1.00, "C": 3.00, "D": 1.00, "E": 1.00, "F": 2.50},
               category="throughput"),
-    Technique("fp8", "FP8 / NVFP4 quantization", REASONER, True, "B",
+    Technique("fp8", "FP8 / NVFP4 quantization", REASONER, True, "F",
               {"vllm": {"quantization": "fp8"}},
-              {"A": 1.20, "B": 1.50, "C": 1.40, "D": 1.30, "E": 1.30, "F": 1.35}),
-    Technique("evs", "EVS token pruning", REASONER, True, "D",
-              {"vllm_omni": {"enable_evs": True}},
-              {"A": 1.00, "B": 1.00, "C": 1.00, "D": 2.20, "E": 1.40, "F": 2.20}),
+              {"A": 1.36, "B": 1.38, "C": 1.22, "D": 1.26, "E": 1.23, "F": 1.36}),
 ]
 
 # ---------------------------------------------------------------------------
@@ -132,7 +127,12 @@ def techniques_for(tower: str) -> list[Technique]:
 
 
 def by_key(tower: str) -> dict[str, Technique]:
-    return {t.key: t for t in techniques_for(tower)}
+    # include eager-only reasoner techniques (e.g. kv-cache) so --enable/--ablate accept them
+    techs = list(techniques_for(tower))
+    if tower == REASONER:
+        seen = {t.key for t in techs}
+        techs += [t for t in EAGER_REASONER_TECHNIQUES if t.key not in seen]
+    return {t.key: t for t in techs}
 
 
 def _collapse_groups(techs: list[Technique]) -> list[Technique]:
@@ -152,16 +152,38 @@ def full_stack(tower: str) -> list[Technique]:
     return _collapse_groups(techniques_for(tower))
 
 
-def ablation_ladder(tower: str) -> list[Technique]:
-    """Cumulative waterfall order: the full stack minus memory-only techniques
-    (they don't reduce single-request latency; CPU offload adds it)."""
+# Eager reference-path ladder (cosmos-framework / HF Transformers) — the FUNDAMENTAL
+# techniques vLLM bakes in and can't toggle. KV cache is the headline (huge on the
+# long-output OP-B). Used only with --backend eager, on single-request OPs (A/B/D/E).
+EAGER_REASONER_TECHNIQUES: list[Technique] = [
+    Technique("kv-cache", "KV cache (use_cache)", REASONER, False, "B",
+              {"hf": {"use_cache": True}},
+              {"A": 2.50, "B": 6.00, "C": 2.00, "D": 1.50, "E": 1.50, "F": 1.60}),
+    Technique("cuda-graphs", "torch.compile / CUDA graphs", REASONER, False, "A",
+              {"hf": {"compile": True}},
+              {"A": 1.60, "B": 1.15, "C": 1.10, "D": 1.10, "E": 1.15, "F": 1.10}),
+    Technique("flash-attn", "FlashAttention (attn_implementation)", REASONER, False, "B",
+              {"hf": {"attn_implementation": "flash_attention_2"}},
+              {"A": 1.20, "B": 1.50, "C": 1.30, "D": 1.40, "E": 1.35, "F": 1.40}),
+    Technique("fp8", "FP8 quantization", REASONER, True, "F",
+              {"hf": {"quantization": "fp8"}},
+              {"A": 1.20, "B": 1.50, "C": 1.40, "D": 1.30, "E": 1.30, "F": 1.35}),
+]
+
+
+def ablation_ladder(tower: str, backend: str = "vllm") -> list[Technique]:
+    """Cumulative waterfall order. The eager backend uses the reference-path ladder
+    (the fundamentals vLLM can't toggle); everyone else uses the full stack minus
+    memory-only techniques (which don't reduce single-request latency)."""
+    if tower == REASONER and backend == "eager":
+        return list(EAGER_REASONER_TECHNIQUES)
     return [t for t in full_stack(tower) if t.category != "memory"]
 
 
 def resolve(tower: str, *, preset: str | None = None,
             enable: list[str] | None = None) -> list[Technique]:
     """Enabled techniques (in ladder order) for a preset or explicit subset."""
-    all_techs = techniques_for(tower)
+    all_techs = list(by_key(tower).values())   # vLLM ladder + eager-only reasoner keys
     if enable:
         wanted = {k.strip() for k in enable if k.strip()}
         known = by_key(tower)

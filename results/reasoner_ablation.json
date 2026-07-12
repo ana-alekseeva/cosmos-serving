@@ -1,6 +1,6 @@
 {
   "tower": "reasoner",
-  "backend": "vllm",
+  "backend": "mock",
   "ops": [
     "A",
     "B",
@@ -11,86 +11,67 @@
   ],
   "variants": [
     "R0 baseline",
-    "+ inference_mode",
-    "+ KV cache",
-    "+ deferred sampling sync",
-    "+ torch.compile / CUDA graphs",
-    "+ FlashAttention / fused attention",
-    "+ paged KV-cache",
-    "+ continuous batching",
-    "+ FP8 / NVFP4 quantization",
-    "+ EVS token pruning"
+    "+ torch.compile + CUDA graphs",
+    "+ FlashAttention (vs SDPA)",
+    "+ prefix caching",
+    "+ chunked prefill",
+    "+ continuous batching (max-num-seqs)",
+    "+ FP8 / NVFP4 quantization"
   ],
   "results": {
     "A": [
       {
         "variant": "R0 baseline",
-        "ms": 573.0,
+        "ms": 1200.0,
         "vs_v0": 1.0,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ inference_mode",
-        "ms": 635.8,
-        "vs_v0": 0.9,
-        "vs_prev": 0.9,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ KV cache",
-        "ms": 573.3,
-        "vs_v0": 1.0,
-        "vs_prev": 1.11,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ deferred sampling sync",
-        "ms": 600.7,
-        "vs_v0": 0.95,
-        "vs_prev": 0.95,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ torch.compile / CUDA graphs",
-        "ms": 179.5,
-        "vs_v0": 3.19,
+        "variant": "+ torch.compile + CUDA graphs",
+        "ms": 358.2,
+        "vs_v0": 3.35,
         "vs_prev": 3.35,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ FlashAttention / fused attention",
-        "ms": 179.1,
-        "vs_v0": 3.2,
-        "vs_prev": 1.0,
+        "variant": "+ FlashAttention (vs SDPA)",
+        "ms": 298.5,
+        "vs_v0": 4.02,
+        "vs_prev": 1.2,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ paged KV-cache",
-        "ms": 179.1,
-        "vs_v0": 3.2,
-        "vs_prev": 1.0,
+        "variant": "+ prefix caching",
+        "ms": 292.7,
+        "vs_v0": 4.1,
+        "vs_prev": 1.02,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ continuous batching",
-        "ms": 179.2,
-        "vs_v0": 3.2,
+        "variant": "+ chunked prefill",
+        "ms": 278.7,
+        "vs_v0": 4.31,
+        "vs_prev": 1.05,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching (max-num-seqs)",
+        "ms": 278.7,
+        "vs_v0": 4.31,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
         "variant": "+ FP8 / NVFP4 quantization",
-        "ms": 131.6,
-        "vs_v0": 4.35,
+        "ms": 204.9,
+        "vs_v0": 5.86,
         "vs_prev": 1.36,
         "lossy": true,
         "scaling": false
@@ -99,72 +80,56 @@
     "B": [
       {
         "variant": "R0 baseline",
-        "ms": 9114.5,
+        "ms": 9000.0,
         "vs_v0": 1.0,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ inference_mode",
-        "ms": 9595.1,
-        "vs_v0": 0.95,
-        "vs_prev": 0.95,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ KV cache",
-        "ms": 9128.8,
-        "vs_v0": 1.0,
-        "vs_prev": 1.05,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ deferred sampling sync",
-        "ms": 9519.5,
-        "vs_v0": 0.96,
-        "vs_prev": 0.96,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ torch.compile / CUDA graphs",
-        "ms": 2799.2,
-        "vs_v0": 3.26,
+        "variant": "+ torch.compile + CUDA graphs",
+        "ms": 2647.1,
+        "vs_v0": 3.4,
         "vs_prev": 3.4,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ FlashAttention / fused attention",
-        "ms": 2798.8,
-        "vs_v0": 3.26,
-        "vs_prev": 1.0,
+        "variant": "+ FlashAttention (vs SDPA)",
+        "ms": 1654.4,
+        "vs_v0": 5.44,
+        "vs_prev": 1.6,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ paged KV-cache",
-        "ms": 2796.7,
-        "vs_v0": 3.26,
-        "vs_prev": 1.0,
+        "variant": "+ prefix caching",
+        "ms": 1622.0,
+        "vs_v0": 5.55,
+        "vs_prev": 1.02,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ continuous batching",
-        "ms": 2798.5,
-        "vs_v0": 3.26,
+        "variant": "+ chunked prefill",
+        "ms": 1544.7,
+        "vs_v0": 5.83,
+        "vs_prev": 1.05,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching (max-num-seqs)",
+        "ms": 1544.7,
+        "vs_v0": 5.83,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
         "variant": "+ FP8 / NVFP4 quantization",
-        "ms": 2033.5,
-        "vs_v0": 4.48,
+        "ms": 1119.4,
+        "vs_v0": 8.04,
         "vs_prev": 1.38,
         "lossy": true,
         "scaling": false
@@ -173,72 +138,56 @@
     "C": [
       {
         "variant": "R0 baseline",
-        "ms": 2010.2,
+        "ms": 6000.0,
         "vs_v0": 1.0,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ inference_mode",
-        "ms": 2062.4,
-        "vs_v0": 0.97,
-        "vs_prev": 0.97,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ KV cache",
-        "ms": 2030.4,
-        "vs_v0": 0.99,
-        "vs_prev": 1.02,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ deferred sampling sync",
-        "ms": 2161.7,
-        "vs_v0": 0.93,
-        "vs_prev": 0.94,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ torch.compile / CUDA graphs",
-        "ms": 702.3,
-        "vs_v0": 2.86,
+        "variant": "+ torch.compile + CUDA graphs",
+        "ms": 1948.1,
+        "vs_v0": 3.08,
         "vs_prev": 3.08,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ FlashAttention / fused attention",
-        "ms": 691.7,
-        "vs_v0": 2.91,
-        "vs_prev": 1.02,
+        "variant": "+ FlashAttention (vs SDPA)",
+        "ms": 1391.5,
+        "vs_v0": 4.31,
+        "vs_prev": 1.4,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ paged KV-cache",
-        "ms": 693.1,
-        "vs_v0": 2.9,
-        "vs_prev": 1.0,
+        "variant": "+ prefix caching",
+        "ms": 1325.2,
+        "vs_v0": 4.53,
+        "vs_prev": 1.05,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ continuous batching",
-        "ms": 698.7,
-        "vs_v0": 2.88,
-        "vs_prev": 0.99,
+        "variant": "+ chunked prefill",
+        "ms": 1204.7,
+        "vs_v0": 4.98,
+        "vs_prev": 1.1,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching (max-num-seqs)",
+        "ms": 401.6,
+        "vs_v0": 14.94,
+        "vs_prev": 3.0,
         "lossy": false,
         "scaling": false
       },
       {
         "variant": "+ FP8 / NVFP4 quantization",
-        "ms": 570.7,
-        "vs_v0": 3.52,
+        "ms": 329.2,
+        "vs_v0": 18.23,
         "vs_prev": 1.22,
         "lossy": true,
         "scaling": false
@@ -247,72 +196,56 @@
     "D": [
       {
         "variant": "R0 baseline",
-        "ms": 971.9,
+        "ms": 4000.0,
         "vs_v0": 1.0,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ inference_mode",
-        "ms": 997.4,
-        "vs_v0": 0.97,
-        "vs_prev": 0.97,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ KV cache",
-        "ms": 976.1,
-        "vs_v0": 1.0,
-        "vs_prev": 1.02,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ deferred sampling sync",
-        "ms": 1003.3,
-        "vs_v0": 0.97,
-        "vs_prev": 0.97,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ torch.compile / CUDA graphs",
-        "ms": 399.6,
-        "vs_v0": 2.43,
+        "variant": "+ torch.compile + CUDA graphs",
+        "ms": 1593.6,
+        "vs_v0": 2.51,
         "vs_prev": 2.51,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ FlashAttention / fused attention",
-        "ms": 398.7,
-        "vs_v0": 2.44,
-        "vs_prev": 1.0,
+        "variant": "+ FlashAttention (vs SDPA)",
+        "ms": 1062.4,
+        "vs_v0": 3.76,
+        "vs_prev": 1.5,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ paged KV-cache",
-        "ms": 398.7,
-        "vs_v0": 2.44,
-        "vs_prev": 1.0,
+        "variant": "+ prefix caching",
+        "ms": 1041.6,
+        "vs_v0": 3.84,
+        "vs_prev": 1.02,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ continuous batching",
-        "ms": 398.9,
-        "vs_v0": 2.44,
+        "variant": "+ chunked prefill",
+        "ms": 868.0,
+        "vs_v0": 4.61,
+        "vs_prev": 1.2,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching (max-num-seqs)",
+        "ms": 868.0,
+        "vs_v0": 4.61,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
         "variant": "+ FP8 / NVFP4 quantization",
-        "ms": 316.9,
-        "vs_v0": 3.07,
+        "ms": 688.9,
+        "vs_v0": 5.81,
         "vs_prev": 1.26,
         "lossy": true,
         "scaling": false
@@ -321,72 +254,56 @@
     "E": [
       {
         "variant": "R0 baseline",
-        "ms": 902.7,
+        "ms": 1800.0,
         "vs_v0": 1.0,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ inference_mode",
-        "ms": 931.2,
-        "vs_v0": 0.97,
-        "vs_prev": 0.97,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ KV cache",
-        "ms": 901.8,
-        "vs_v0": 1.0,
-        "vs_prev": 1.03,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ deferred sampling sync",
-        "ms": 978.7,
-        "vs_v0": 0.92,
-        "vs_prev": 0.92,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ torch.compile / CUDA graphs",
-        "ms": 313.7,
-        "vs_v0": 2.88,
+        "variant": "+ torch.compile + CUDA graphs",
+        "ms": 576.9,
+        "vs_v0": 3.12,
         "vs_prev": 3.12,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ FlashAttention / fused attention",
-        "ms": 313.6,
-        "vs_v0": 2.88,
-        "vs_prev": 1.0,
+        "variant": "+ FlashAttention (vs SDPA)",
+        "ms": 412.1,
+        "vs_v0": 4.37,
+        "vs_prev": 1.4,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ paged KV-cache",
-        "ms": 313.4,
-        "vs_v0": 2.88,
-        "vs_prev": 1.0,
+        "variant": "+ prefix caching",
+        "ms": 404.0,
+        "vs_v0": 4.46,
+        "vs_prev": 1.02,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ continuous batching",
-        "ms": 313.2,
-        "vs_v0": 2.88,
+        "variant": "+ chunked prefill",
+        "ms": 351.3,
+        "vs_v0": 5.12,
+        "vs_prev": 1.15,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching (max-num-seqs)",
+        "ms": 351.3,
+        "vs_v0": 5.12,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
         "variant": "+ FP8 / NVFP4 quantization",
-        "ms": 254.2,
-        "vs_v0": 3.55,
+        "ms": 285.6,
+        "vs_v0": 6.3,
         "vs_prev": 1.23,
         "lossy": true,
         "scaling": false
@@ -395,82 +312,61 @@
     "F": [
       {
         "variant": "R0 baseline",
-        "ms": 4218.4,
+        "ms": 9000.0,
         "vs_v0": 1.0,
         "vs_prev": 1.0,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ inference_mode",
-        "ms": 4189.1,
-        "vs_v0": 1.01,
-        "vs_prev": 1.01,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ KV cache",
-        "ms": 4215.0,
-        "vs_v0": 1.0,
-        "vs_prev": 0.99,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ deferred sampling sync",
-        "ms": 4239.0,
-        "vs_v0": 1.0,
-        "vs_prev": 0.99,
-        "lossy": false,
-        "scaling": false
-      },
-      {
-        "variant": "+ torch.compile / CUDA graphs",
-        "ms": 3658.6,
-        "vs_v0": 1.15,
+        "variant": "+ torch.compile + CUDA graphs",
+        "ms": 7758.6,
+        "vs_v0": 1.16,
         "vs_prev": 1.16,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ FlashAttention / fused attention",
-        "ms": 3671.0,
-        "vs_v0": 1.15,
-        "vs_prev": 1.0,
+        "variant": "+ FlashAttention (vs SDPA)",
+        "ms": 5172.4,
+        "vs_v0": 1.74,
+        "vs_prev": 1.5,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ paged KV-cache",
-        "ms": 3673.8,
-        "vs_v0": 1.15,
-        "vs_prev": 1.0,
+        "variant": "+ prefix caching",
+        "ms": 4926.1,
+        "vs_v0": 1.83,
+        "vs_prev": 1.05,
         "lossy": false,
         "scaling": false
       },
       {
-        "variant": "+ continuous batching",
-        "ms": 3675.9,
-        "vs_v0": 1.15,
-        "vs_prev": 1.0,
+        "variant": "+ chunked prefill",
+        "ms": 4105.1,
+        "vs_v0": 2.19,
+        "vs_prev": 1.2,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ continuous batching (max-num-seqs)",
+        "ms": 1642.0,
+        "vs_v0": 5.48,
+        "vs_prev": 2.5,
         "lossy": false,
         "scaling": false
       },
       {
         "variant": "+ FP8 / NVFP4 quantization",
-        "ms": 2704.7,
-        "vs_v0": 1.56,
+        "ms": 1207.4,
+        "vs_v0": 7.45,
         "vs_prev": 1.36,
         "lossy": true,
         "scaling": false
       }
     ]
   },
-  "failed": [
-    [
-      "+ EVS token pruning",
-      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --enable-evs --quantization fp8\n  --- vllm log tail (/tmp/vllm-serve-y9j72h36.log) ---\nINFO 07-11 22:23:11 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nusage: vllm [-h] [-v]\n            {chat,complete,serve,launch,bench,collect-env,run-batch} ...\nvllm: error: unrecognized arguments: --enable-evs\n"
-    ]
-  ]
+  "failed": []
 }

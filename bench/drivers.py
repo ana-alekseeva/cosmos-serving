@@ -93,8 +93,11 @@ _ENGINES = {"mock": MockEngine, "vllm": VLLMEngine}
 
 def make_engine(backend: str, enabled: list[Technique], *, tower: str = REASONER,
                 model: str | None = None, port: int = 8000):
+    if backend == "eager":
+        from bench.eager import EagerEngine  # lazy: avoids a circular import
+        return EagerEngine(enabled, tower=tower, model=model, port=port)
     if backend not in _ENGINES:
-        raise ValueError(f"unknown backend {backend!r}; expected one of {sorted(_ENGINES)}")
+        raise ValueError(f"unknown backend {backend!r}; expected mock | vllm | eager")
     return _ENGINES[backend](enabled, tower=tower, model=model, port=port)
 
 
