@@ -20,6 +20,7 @@ class Measurement:
     op: str
     p50_ms: float
     p95_ms: float
+    samples_ms: tuple[float, ...] = ()   # raw per-repeat latencies (empty if the backend can't expose them)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -37,8 +38,12 @@ class MockEngine:
         latency = op.baseline_latency_ms
         for t in self.enabled:
             latency /= t.mock_speedups.get(op.name, 1.0)
-        # deterministic p95 spread so downstream code exercises both fields
-        return Measurement(op.name, round(latency, 3), round(latency * 1.05, 3))
+        p50 = round(latency, 3)
+        # the model is deterministic: every repeat yields the same latency, so the full
+        # trace is `repeats` identical samples. Keep the fixed p95 spread so downstream
+        # code exercises both fields.
+        samples = tuple(p50 for _ in range(max(1, repeats)))
+        return Measurement(op.name, p50, round(latency * 1.05, 3), samples)
 
     def close(self) -> None:
         pass
@@ -80,7 +85,8 @@ class VLLMEngine:
         else:
             from bench.aiperf import run_aiperf
             r = run_aiperf(server.base_url, model, op, warmup=warmup, request_count=max(30, repeats))
-        return Measurement(op.name, round(r["p50_ms"], 3), round(r["p95_ms"], 3))
+        return Measurement(op.name, round(r["p50_ms"], 3), round(r["p95_ms"], 3),
+                           tuple(r.get("samples_ms", ())))
 
     def close(self) -> None:
         if self._server is not None:

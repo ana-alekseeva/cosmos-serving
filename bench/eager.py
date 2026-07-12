@@ -45,7 +45,7 @@ class EagerEngine:
 
         # baseline attention = "sdpa" (reference); flash-attn switches it on
         attn = "flash_attention_2" if "flash-attn" in self.keys else "sdpa"
-        kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation=attn, device_map="cuda")
+        kwargs = dict(dtype=torch.bfloat16, attn_implementation=attn, device_map="cuda")
         if "fp8" in self.keys:
             # VERIFY: HF fp8 path, e.g. quantization_config=FineGrainedFP8Config()
             from transformers import FineGrainedFP8Config  # VERIFY import
@@ -123,6 +123,7 @@ class EagerEngine:
             torch.cuda.synchronize()
             samples_ms.append(start.elapsed_time(end))
 
+        trace = tuple(round(s, 3) for s in samples_ms)   # preserve raw per-repeat order for the full trace
         samples_ms.sort()
         p95 = samples_ms[min(len(samples_ms) - 1, round(0.95 * (len(samples_ms) - 1)))]
-        return Measurement(op.name, round(statistics.median(samples_ms), 3), round(p95, 3))
+        return Measurement(op.name, round(statistics.median(samples_ms), 3), round(p95, 3), trace)

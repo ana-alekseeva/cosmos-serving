@@ -45,6 +45,7 @@ def optimize_cmd(
     op: str = typer.Option(None, "--op", help="restrict to a single operating point"),
     model: str = typer.Option(None, "--model", help="HF model id (default nvidia/Cosmos3-Nano)"),
     port: int = typer.Option(8000, "--port", help="server port (vllm backend)"),
+    repeats: int = typer.Option(10, "--repeats", help="timed runs per measurement (eager: 2-3 is plenty — it's deterministic)"),
     out_dir: Path = typer.Option(Path("results"), "--out-dir", help="artifact directory"),
     output: str = typer.Option("text", "--output", help="text | json"),
 ) -> None:
@@ -58,18 +59,21 @@ def optimize_cmd(
 
     if ablate:
         js = out_dir / f"{tower}_ablation.json"
+        js_full = out_dir / f"{tower}_ablation_full.json"
         js.parent.mkdir(parents=True, exist_ok=True)
 
-        def _on_variant(res, v):  # persist partial JSON + log progress after each variant
+        def _on_variant(res, v):  # persist partial JSON (summary + full trace) after each variant
             js.write_text(json.dumps(res.to_dict(), indent=2))
-            cells = "  ".join(f"{o.name}={res.p50[(v.index, o.name)]:.0f}ms" for o in ops)
+            js_full.write_text(json.dumps(res.to_full_dict(), indent=2))
+            cells = "  ".join(f"{o.name}={res.p50[(v.index, o.name)]:.0f}ms" for o in res.ops)
             typer.echo(f"[{tower}] variant {v.index + 1}/{len(res.variants)} done — {v.label}: {cells}")
 
         result = run_ablation(tower, backend=backend, ops=ops, model=model, port=port,
-                              on_variant=_on_variant)
+                              repeats=repeats, on_variant=_on_variant)
         from bench.plots import plot_contribution_waterfall  # lazy: needs matplotlib
         png = plot_contribution_waterfall(result, out_dir / f"{tower}_waterfall.png")
         js.write_text(json.dumps(result.to_dict(), indent=2))
+        js_full.write_text(json.dumps(result.to_full_dict(), indent=2))
         if output == "text":
             print_summary(result)
             if result.failed:
@@ -77,9 +81,10 @@ def optimize_cmd(
                            f"bench/serving.py::_ENABLE_ARGS and re-run:")
                 for label, _ in result.failed:
                     typer.echo(f"  - {label}")
-            typer.echo(f"\nwaterfall -> {png}\nablation  -> {js}")
+            typer.echo(f"\nwaterfall  -> {png}\nablation   -> {js}\nfull trace -> {js_full}")
         else:
-            _emit({**result.to_dict(), "waterfall": str(png), "ablation": str(js)}, output)
+            _emit({**result.to_dict(), "waterfall": str(png), "ablation": str(js),
+                   "ablation_full": str(js_full)}, output)
         return
 
     # Selection mode: measure the chosen subset / preset across the operating points.

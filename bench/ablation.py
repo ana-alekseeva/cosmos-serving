@@ -27,8 +27,10 @@ class AblationResult:
     backend: str
     ops: list[OperatingPoint]
     variants: list[Variant]
+    repeats: int = 10                         # timed runs per cell (for the full trace)
     p50: dict = field(default_factory=dict)   # (variant_index, op_name) -> ms
     p95: dict = field(default_factory=dict)
+    samples: dict = field(default_factory=dict)  # (variant_index, op_name) -> [ms per repeat]
     failed: list = field(default_factory=list)  # [(variant_label, error_msg)] for skipped variants
 
     def latencies(self, op_name: str) -> list[float]:
@@ -68,6 +70,37 @@ class AblationResult:
             "failed": self.failed,
         }
 
+    def full_rows(self, op_name: str) -> list[dict]:
+        """Per-variant rows carrying every raw repeat alongside p50/p95 (the full trace)."""
+        rows = []
+        for v in self.variants:
+            key = (v.index, op_name)
+            if key not in self.p50:
+                break                       # not measured yet (partial result)
+            trace = list(self.samples.get(key, []))
+            rows.append({
+                "variant": v.label,
+                "p50_ms": round(self.p50[key], 3),
+                "p95_ms": round(self.p95[key], 3),
+                "n": len(trace),
+                "samples_ms": trace,
+            })
+        return rows
+
+    def to_full_dict(self) -> dict:
+        """Full-trace artifact: every repeat for every (variant, op), not just p50/p95."""
+        return {
+            "tower": self.tower,
+            "backend": self.backend,
+            "repeats": self.repeats,
+            "ops": [op.name for op in self.ops],
+            "variants": [v.label for v in self.variants],
+            "results": {
+                op.name: self.full_rows(op.name) for op in self.ops
+            },
+            "failed": self.failed,
+        }
+
 
 def _baseline_label(tower: str) -> str:
     return ("R0" if tower == REASONER else "G0") + " baseline"
@@ -86,7 +119,8 @@ def run_ablation(tower: str, *, backend: str = "mock",
     for i, tech in enumerate(ladder, start=1):
         variants.append(Variant(i, f"+ {tech.label}", tech, tuple(ladder[:i])))
 
-    result = AblationResult(tower=tower, backend=backend, ops=ops, variants=variants)
+    result = AblationResult(tower=tower, backend=backend, ops=ops, variants=variants,
+                            repeats=repeats)
     for v in variants:
         # server config depends on the technique set: one server per variant, reused
         # across ops, then torn down before the next variant relaunches (real backend).
@@ -96,10 +130,12 @@ def run_ablation(tower: str, *, backend: str = "mock",
                 m = engine.measure(op, repeats=repeats)
                 result.p50[(v.index, op.name)] = m.p50_ms
                 result.p95[(v.index, op.name)] = m.p95_ms
+                result.samples[(v.index, op.name)] = list(m.samples_ms)
         except Exception as exc:
             for op in ops:                          # drop this variant's partial data
                 result.p50.pop((v.index, op.name), None)
                 result.p95.pop((v.index, op.name), None)
+                result.samples.pop((v.index, op.name), None)
             full = str(exc)
             result.failed.append((v.label, full[:1500]))
             hint = next((ln for ln in reversed(full.splitlines())
