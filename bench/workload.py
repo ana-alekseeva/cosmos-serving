@@ -32,6 +32,7 @@ class OperatingPoint:
     baseline_latency_ms: float    # naive-baseline per-clip latency (generator mock anchor; unused for reasoner)
     clip_frames: int = 0
     clip_resolution: str = ""
+    video_fps: float = 0.0         # reasoner video shapes: AIPerf --video-fps (frames = fps x duration)
     batch_max: int = 1             # generator: max admissible batch under the 74k-token context (Table 9)
 
     def label(self) -> str:
@@ -100,27 +101,32 @@ BATCHING_TABLE9: dict[str, dict[str, int]] = {
 REASONER_CONCURRENCIES: tuple[int, ...] = (1, 64, 128, 256)
 REASONER_OUTPUTS: tuple[int, ...] = (1, 100)   # NVIDIA: output 1 (captioning) and 100 (VQA)
 REASONER_INPUT_TOKENS = 50                     # NVIDIA fixed text-prompt length
+# Same clip sampled at 1 vs 2 FPS -> 2x the frames/vision-tokens (NVIDIA "Video 1/2 FPS").
+# VERIFY: NVIDIA's clip length is unpublished; this duration sets the absolute frame count.
+REASONER_VIDEO_DURATION_S = 4
 
-# (family, modality, clip_frames, resolution, fps_label) — input=50 for all (NVIDIA std).
+# (family, modality, video_fps, resolution, fps_label) — input=50 for all (NVIDIA std).
 _REASONER_SHAPES: list[tuple] = [
     ("txt",  "text",  0, "",      ""),
-    ("img",  "image", 1, "512px", ""),
-    ("vid1", "video", 8, "256p",  " video@1fps"),   # ~1 FPS clip  # VERIFY frame count vs NVIDIA clip
-    ("vid2", "video", 16, "256p", " video@2fps"),   # ~2 FPS clip  # VERIFY frame count vs NVIDIA clip
+    ("img",  "image", 0, "512px", ""),
+    ("vid1", "video", 1, "256p",  " video@1fps"),   # NVIDIA "Video 1 FPS"
+    ("vid2", "video", 2, "256p",  " video@2fps"),   # NVIDIA "Video 2 FPS"
 ]
 
 
 def _build_reasoner_ops() -> list[OperatingPoint]:
     ops: list[OperatingPoint] = []
-    for family, modality, frames, res, fps in _REASONER_SHAPES:
+    for family, modality, fps, res, label in _REASONER_SHAPES:
+        frames = (round(fps * REASONER_VIDEO_DURATION_S) if modality == "video"
+                  else 1 if modality == "image" else 0)
         for out_tok in REASONER_OUTPUTS:
             for conc in REASONER_CONCURRENCIES:
                 ops.append(OperatingPoint(
                     f"{family}-o{out_tok}-c{conc}", REASONER,
-                    f"{modality} in=50 out={out_tok}{fps} @ c{conc}",
+                    f"{modality} in=50 out={out_tok}{label} @ c{conc}",
                     input_tokens=REASONER_INPUT_TOKENS, output_tokens=out_tok, concurrency=conc,
                     modality=modality, baseline_latency_ms=0.0,
-                    clip_frames=frames, clip_resolution=res))
+                    clip_frames=frames, clip_resolution=res, video_fps=fps))
     return ops
 
 

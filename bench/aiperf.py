@@ -19,7 +19,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from bench.workload import OperatingPoint
+from bench.workload import REASONER_VIDEO_DURATION_S, OperatingPoint
 
 
 # Requests needed for a steady-state throughput/latency read scale with concurrency: send
@@ -55,16 +55,17 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
     ]
     if op.modality == "image":
         w, h = _res_to_wh(op.clip_resolution)
-        # VERIFY: default is 1 image/request; confirm the flag that sets image count if needed.
+        # AIPerf sends 1 synthetic image/request by default (--image-batch-size 1).
         cmd += ["--image-width-mean", str(w), "--image-height-mean", str(h)]
     elif op.modality == "video":
         w, h = _res_to_wh(op.clip_resolution)
-        # VERIFY on-box: AIPerf's synthetic-VIDEO support + exact flags. `clip_frames` encodes
-        # the 1-vs-2 FPS distinction (NVIDIA "Video 1/2 FPS"). If AIPerf can't synthesize video,
-        # supply a fixed sample clip of `op.clip_frames` frames at (w,h) via --input-file, or pass
-        # the frame count through to the request with an extra input.
-        cmd += ["--image-width-mean", str(w), "--image-height-mean", str(h),
-                "--extra-inputs", f"num_frames:{op.clip_frames}"]   # VERIFY payload key
+        # Real synthetic video (NVIDIA "Video 1/2 FPS"): frames = fps x duration, so 2 FPS at the
+        # same duration carries 2x the vision tokens. NB: do NOT pass --image-* here, or AIPerf
+        # would also attach an image. Requires FFmpeg on the host.
+        duration = max(1, round(op.clip_frames / op.video_fps)) if op.video_fps else REASONER_VIDEO_DURATION_S
+        cmd += ["--video-fps", str(int(op.video_fps)), "--video-duration", str(duration),
+                "--video-width", str(w), "--video-height", str(h),
+                "--video-synth-type", "noise"]   # content is semantically irrelevant; only shape matters
     subprocess.run(cmd, check=True)
     return _parse_aiperf(out_dir)
 
