@@ -4,6 +4,13 @@ technique set — the real backend's server lifecycle.
 IMPORTANT: written against the documented vLLM / vLLM-Omni CLI, but NOT yet run on a
 GPU. Every mapping marked `# VERIFY` must be confirmed on-box against the installed
 version and `recipes/cosmos3/Cosmos3-Nano.md`. The mock backend needs none of this.
+
+Two very different launches:
+  - Reasoner: ONE stock-vLLM config, reused for the whole concurrency sweep (§5.3.2 —
+    the report inherits Qwen3-VL serving out of the box). Concurrency is varied by
+    AIPerf per request, not by a server flag. `techniques` is always empty here.
+  - Generator: one vLLM-Omni server per ablation variant; each enabled technique adds
+    its flags, and CUDA graphs is a real toggle (baseline is --enforce-eager).
 """
 from __future__ import annotations
 
@@ -20,19 +27,16 @@ from optimize.registry import GENERATOR, REASONER, Technique
 
 DEFAULT_MODEL = "nvidia/Cosmos3-Nano"
 
-# Reasoner run is pinned so variants are comparable and low-noise (fixed precision, KV budget,
-# GPU memory, seed). Without this, latency drifts run-to-run and the non-FP8 baseline's dtype is
-# left to `auto`. VERIFY on-box: MAX_MODEL_LEN must be >= the largest OP sequence and <= the model's
-# native max_position_embeddings.
-REASONER_DTYPE = "bfloat16"
+# Pin the run so variants/points are comparable and low-noise (spec N1/N2).
+DTYPE = "bfloat16"
 MAX_MODEL_LEN = 8192
 GPU_MEM_UTIL = 0.90
 SEED = 0
 
-# Default-OFF techniques: add these server args when the technique is ENABLED.
+# Generator (vLLM-Omni) technique -> server args, added when the technique is ENABLED.
+# VERIFY exact names on-box against recipes/cosmos3/Cosmos3-Nano.md.
 _ENABLE_ARGS: dict[str, list[str]] = {
     "fp8":              ["--quantization", "fp8"],
-    # generator (vLLM-Omni), default-off — VERIFY exact names on-box:
     "cache-dit":        ["--cache-dit"],
     "vae-patch":        ["--vae-patch-parallel"],
     "cfg-parallel":     ["--cfg-parallel"],
@@ -45,46 +49,25 @@ _MULTI_GPU = {"cfg-parallel", "context-parallel"}  # need 2 GPUs
 
 def build_command(model: str, tower: str, techniques: list[Technique],
                   port: int) -> tuple[list[str], dict, int]:
-    """Build the vLLM launch command + env for a technique set.
-
-    vLLM ships most optimizations ON by default, so a *naive* baseline must DISABLE
-    them and each technique re-enables exactly one — otherwise "adding" a default-on
-    technique is a no-op.
-    """
+    """Build the vLLM launch command + env for a tower / technique set."""
     keys = {t.key for t in techniques}
-    cmd = ["vllm", "serve", model, "--host", "0.0.0.0", "--port", str(port)]
+    cmd = ["vllm", "serve", model, "--host", "0.0.0.0", "--port", str(port),
+           "--dtype", DTYPE, "--max-model-len", str(MAX_MODEL_LEN),
+           "--gpu-memory-utilization", str(GPU_MEM_UTIL), "--seed", str(SEED)]
     env: dict[str, str] = {}
-    if tower == GENERATOR:
-        cmd.append("--omni")
-
-    # torch.compile + CUDA graphs (both towers): off = --enforce-eager
-    if "cuda-graphs" not in keys:
-        cmd.append("--enforce-eager")
 
     if tower == REASONER:
-        # Pin the run so variants are comparable + low-noise: fixed precision, KV budget, GPU
-        # memory, and seed (spec N1 reproducibility / N2 comparability). Without this, latency
-        # drifts run-to-run and the non-FP8 baseline's dtype is left to `auto`.
-        cmd += [
-            "--dtype", REASONER_DTYPE,
-            "--max-model-len", str(MAX_MODEL_LEN),
-            "--gpu-memory-utilization", str(GPU_MEM_UTIL),
-            "--seed", str(SEED),
-        ]
-        # LLM-serving knobs default ON -> disable the toggleable ones in the naive baseline,
-        # re-enable exactly one per technique.
-        if "prefix-caching" not in keys:
-            cmd.append("--no-enable-prefix-caching")       # disableable on V1
-        if "continuous-batching" not in keys:
-            cmd += ["--max-num-seqs", "1"]                 # serialize -> no batching
-        # Two default-on features are NOT ablation rungs on the V1 engine — vLLM won't toggle them
-        # off, so they're pinned in the stock baseline: FlashAttention (auto-selects FA3; no
-        # TORCH_SDPA backend for Cosmos3) and chunked prefill (always on; --no-enable-chunked-prefill
-        # is ignored). FlashAttention's contribution is attributed in the eager path (bench.fa2_probe).
+        # Stock vLLM, out of the box: paged KV-cache, continuous batching, fused
+        # attention, prefix caching are all ON by default — that IS the config the
+        # report uses. No ablation toggles here; the sweep varies concurrency via AIPerf.
+        return cmd, env, 1
 
+    # Generator (vLLM-Omni).
+    cmd.append("--omni")
+    if "cuda-graphs" not in keys:               # torch.compile + CUDA graphs: baseline is eager
+        cmd.append("--enforce-eager")
     for k in sorted(keys):
         cmd += _ENABLE_ARGS.get(k, [])
-
     n_gpus = 2 if keys & _MULTI_GPU else 1
     if n_gpus > 1:
         cmd += ["--tensor-parallel-size", "2"]

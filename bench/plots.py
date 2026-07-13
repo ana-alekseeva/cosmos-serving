@@ -1,9 +1,11 @@
-"""Plotting — the contribution waterfall + stage breakdown (specification.md §4).
+"""Plotting — the three headline figures (specification.md §4).
 
 Style follows gpu_and_inference_hw/hw3/engine_utils.py (Agg backend, shared palette,
-savefig dpi=150). The waterfall is the headline deliverable: one panel per operating
-point, each a descending staircase of cumulative latency with the marginal % drop of
-every technique annotated.
+savefig dpi=150):
+  - plot_contribution_waterfall : Generator per-clip latency waterfall, one panel per
+    operating point, each a descending staircase with the marginal % drop annotated.
+  - plot_reasoner_sweep         : Reasoner TTFT + throughput vs concurrency (§5.3.2).
+  - plot_batching_throughput    : Generator batching gain vs resolution (Table 9).
 """
 from __future__ import annotations
 
@@ -13,28 +15,17 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 
 from bench.ablation import AblationResult
+from bench.sweep import BatchingSweepResult, ReasonerSweepResult
 
 # Professional palette (brand reference — sequential blue + teal).
 COLOR_BAR = "#1a80bb"      # lossless — medium blue
 COLOR_LOSSY = "#8cc5e3"    # lossy (quality-guarded) — light blue
-COLOR_SCALING = "#298c8c"  # scaling / multi-GPU (e.g. CFG-Parallel) — teal
-COLOR_ANNOT = "black"      # contribution (%) labels
+COLOR_SCALING = "#298c8c"  # scaling / multi-GPU (CFG-/Context-Parallel) — teal
+COLOR_ANNOT = "black"
 COLOR_GRID = "#d9d9d9"
-COLOR_STOCK = "#555555"    # "stock vLLM" reference line (end of the default-on prefix)
-
-
-def _stock_index(rows_data: list[dict]) -> int:
-    """Index of the last variant in the contiguous run of vLLM default-on techniques
-    (i.e. the cumulative 'stock vLLM' config). 0 if there is no such prefix."""
-    k = 0
-    for i in range(1, len(rows_data)):
-        if not rows_data[i].get("default_on"):
-            break
-        k = i
-    return k
+_SERIES_COLORS = ["#1a80bb", "#8cc5e3", "#298c8c", "#b8b8b8", "#e39a1a"]
 
 
 def _bar_color(row: dict) -> str:
@@ -59,7 +50,6 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
     fig.suptitle(title or f"Cosmos 3 {result.tower.title()} — technique contribution "
                           f"(backend={result.backend})", fontsize=14, y=0.99)
 
-    drew_stock = False
     for idx, op in enumerate(ops):
         ax = axes[idx // cols][idx % cols]
         rows_data = result.marginal_rows(op.name)
@@ -68,37 +58,24 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
         colors = [_bar_color(r) for r in rows_data]
 
         x = range(len(labels))
-        ax.set_axisbelow(True)                                   # grid behind the bars
+        ax.set_axisbelow(True)
         ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
-        ax.bar(x, lat, color=colors, zorder=3)                   # opaque bars over the grid
+        ax.bar(x, lat, color=colors, zorder=3)
 
-        # annotate EVERY technique's marginal % drop vs the previous variant
-        for i in range(1, len(lat)):
+        for i in range(1, len(lat)):                 # marginal % drop vs the previous variant
             drop = 100.0 * (1.0 - lat[i] / lat[i - 1]) if lat[i - 1] > 0 else 0.0
             txt = f"-{drop:.0f}%" if drop >= 0.5 else (f"+{-drop:.0f}%" if drop <= -0.5 else "0%")
             ax.annotate(txt, (i, lat[i]), textcoords="offset points", xytext=(0, 4),
                         ha="center", fontsize=7, color=COLOR_ANNOT)
-
-        # "stock vLLM" line: cumulative latency after the default-on features. Bars at/left
-        # of it are what vLLM ships enabled; bars to the right are opt-in latency wins (FP8).
-        k = _stock_index(rows_data)
-        if k:
-            drew_stock = True
-            ax.axhline(lat[k], color=COLOR_STOCK, linestyle="--", linewidth=1.0, zorder=4)
-            ax.annotate("stock vLLM", (len(labels) - 1, lat[k]), textcoords="offset points",
-                        xytext=(0, 3), ha="right", va="bottom", fontsize=7,
-                        color=COLOR_STOCK, fontstyle="italic")
 
         ax.set_title(op.label(), fontsize=11)
         ax.set_ylabel("latency (ms)")
         ax.set_xticks(list(x))
         ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7)
 
-    # hide unused axes
     for j in range(len(ops), rows * cols):
         axes[j // cols][j % cols].axis("off")
 
-    # single overall legend — only the categories actually present
     all_rows = [r for op in ops for r in result.marginal_rows(op.name)]
     legend_items = [(COLOR_BAR, "lossless")]
     if any(r["lossy"] and not r["scaling"] for r in all_rows):
@@ -106,35 +83,81 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
     if any(r["scaling"] for r in all_rows):
         legend_items.append((COLOR_SCALING, "scaling (multi-GPU)"))
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c, _ in legend_items]
-    labels_l = [lbl for _, lbl in legend_items]
-    if drew_stock:                                    # dashed reference line -> Line2D handle
-        handles.append(Line2D([0], [0], color=COLOR_STOCK, linestyle="--"))
-        labels_l.append("stock vLLM (defaults on)")
-    fig.legend(handles, labels_l,
+    fig.legend(handles, [lbl for _, lbl in legend_items],
                loc="lower center", ncol=len(handles), fontsize=10, frameon=False)
 
     plt.tight_layout(rect=(0, 0.03, 1, 0.97))
-    out = Path(out_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    return out
+    return _save(fig, out_path)
 
 
-def plot_stage_breakdown(stage_times_ms: dict[str, float], out_path: str | Path,
-                         title: str = "Stage breakdown") -> Path:
-    """Stacked single-bar of where wall-clock goes (fed by bench.stages).
+def plot_reasoner_sweep(result: ReasonerSweepResult, out_path: str | Path,
+                        title: str | None = None) -> Path:
+    """TTFT and aggregate throughput vs concurrency, one curve per fixed shape."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle(title or f"Cosmos 3 Reasoner — stock vLLM concurrency sweep "
+                          f"(backend={result.backend})", fontsize=14)
 
-    Stub for Part 1 step 5 — real per-stage timings come from bench.stages.StageTimer.
-    """
-    fig, ax = plt.subplots(figsize=(6, 6))
-    bottom = 0.0
-    for name, ms in stage_times_ms.items():
-        ax.bar("end-to-end", ms, bottom=bottom, label=name)
-        bottom += ms
-    ax.set_ylabel("latency (ms)")
-    ax.set_title(title)
-    ax.legend(fontsize=8, loc="upper right")
+    for ax, metric, ylabel, title_ in (
+        (axes[0], "ttft_ms", "TTFT (ms)", "Time-to-first-token vs concurrency"),
+        (axes[1], "throughput_tok_s", "throughput (tok/s)", "Decode throughput vs concurrency"),
+    ):
+        ax.set_axisbelow(True)
+        ax.grid(color=COLOR_GRID, linewidth=0.8)
+        for si, shape in enumerate(result.shapes):
+            pts = result.curve(shape, metric)
+            if not pts:
+                continue
+            xs, ys = zip(*pts)
+            ax.plot(xs, ys, marker="o", color=_SERIES_COLORS[si % len(_SERIES_COLORS)], label=shape)
+            for xv, yv in pts:
+                ax.annotate(f"{yv:.0f}", (xv, yv), textcoords="offset points",
+                            xytext=(0, 6), ha="center", fontsize=7, color=COLOR_ANNOT)
+        ax.set_xscale("log", base=2)
+        ax.set_xticks(result.concurrencies)
+        ax.set_xticklabels([str(c) for c in result.concurrencies])
+        ax.set_xlabel("concurrency")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title_, fontsize=11)
+        ax.legend(title="shape", fontsize=9)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    return _save(fig, out_path)
+
+
+def plot_batching_throughput(result: BatchingSweepResult, out_path: str | Path,
+                             title: str | None = None) -> Path:
+    """Grouped bars: batching throughput gain (%) per resolution, per series (Table 9)."""
+    resolutions = sorted({r["resolution"] for r in result.rows})
+    series = list(dict.fromkeys(r["series"] for r in result.rows))  # preserve first-seen order
+    fig, ax = plt.subplots(figsize=(max(7.5, 2.4 * len(resolutions) + 3), 5))
+    ax.set_title(title or f"Cosmos 3 Generator — batching throughput gain, T2V 189f "
+                          f"(Table 9, backend={result.backend})", fontsize=11)
+
+    width = 0.8 / max(1, len(series))
+    for si, s in enumerate(series):
+        xs, ys = [], []
+        for ri, res in enumerate(resolutions):
+            match = next((r for r in result.rows if r["resolution"] == res and r["series"] == s), None)
+            xs.append(ri + si * width)
+            ys.append(match["gain_pct"] if match else 0.0)
+        ax.bar(xs, ys, width=width, color=_SERIES_COLORS[si % len(_SERIES_COLORS)],
+               label=s, zorder=3)
+        for xv, yv in zip(xs, ys):
+            ax.annotate(f"{yv:.0f}%", (xv, yv), textcoords="offset points", xytext=(0, 3),
+                        ha="center", fontsize=7, color=COLOR_ANNOT)
+
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", color=COLOR_GRID, linewidth=0.8)
+    ax.set_xticks([ri + width * (len(series) - 1) / 2 for ri in range(len(resolutions))])
+    batch_max = {r["resolution"]: r["batch_max"] for r in result.rows}
+    ax.set_xticklabels([f"{res}\n(B≤{batch_max[res]})" for res in resolutions])
+    ax.set_ylabel("throughput gain vs B=1 (%)")
+    ax.legend(fontsize=9)
+    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    return _save(fig, out_path)
+
+
+def _save(fig, out_path: str | Path) -> Path:
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)

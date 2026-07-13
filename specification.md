@@ -2,8 +2,33 @@
 
 **Project:** `cosmos-serving`
 **Owner:** Anastasiia Alekseeva
-**Status:** Draft spec — **Part 1 (reproduce NVIDIA + selectable `optimize`)** scoped now, Reasoner→Generator; **Part 2 (1–2 new techniques)** later
-**Last updated:** 2026-07-11
+**Status:** Draft spec — **Part 1 (reproduce NVIDIA + selectable `optimize`)**; **Part 2 (1–2 new techniques)** later
+**Last updated:** 2026-07-13
+
+---
+
+## 0. Refinement (2026-07-13) — realign to what §5.3 actually quantifies
+
+The first pass inverted the report's emphasis and over-built the harness. Corrected here:
+
+- **The report quantifies the *Generator*, not the Reasoner.** Every stated serving
+  number in §5.3 is Generator-side: CUDA graphs **30–60% on T2I** (§5.3.1), CFG-Parallel
+  "nearly halves per-step latency", reasoner-tower caching, Cache-DiT, FP8, VAE-patch,
+  and request batching **Table 9**. The Reasoner (§5.3.2) is explicitly "reuse Qwen3-VL
+  in vLLM/TRT-LLM out of the box" — the report presents **no reasoner technique ablation**.
+- **So the Reasoner gets a stock-vLLM concurrency/shape sweep, not a technique waterfall.**
+  The earlier reasoner ladder (crippled `--enforce-eager --no-enable-prefix-caching
+  --max-num-seqs 1` baseline, each rung re-enabling a vLLM default) measured stock-vLLM
+  defaults, not NVIDIA techniques. Replaced by TTFT + throughput vs concurrency
+  {1,64,128,256} at fixed shapes (mirrors `inference_benchmarks.md`).
+- **Batching is a throughput result, not a latency rung.** It is measured in a separate
+  batching-throughput sweep that reproduces **Table 9**, not placed on the latency waterfall.
+- **Harness cut to the faithful core.** Removed: the eager parallel reasoner ladder,
+  the FA2×compile probe (a self-inflicted rabbit hole — the report doesn't toggle
+  flash-attn), roofline, per-stage timers, the equivalence stub, and the workflow twin.
+  Kept: workload OPs, the ablation runner, the sweep runners, both backends, plots.
+- **Superseded below:** the Reasoner ladder (old §6) and the reasoner rows of §4/§5/§11.
+  §6 is rewritten. Sections not touched still describe the general method.
 
 ---
 
@@ -26,9 +51,9 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
 - **Two towers, both in scope:**
   - **Reasoner** (VLM, autoregressive, **Qwen3-VL** backbone) — fast: ~83 ms TTFT, ~2,800 tok/s at high concurrency. Served by **vLLM**. Runs on **1× H200**.
   - **Generator** (diffusion, MoT) — slow: ~108 s (Nano 720p, 1× B200); ~240 s on 1× H200. Served by **vLLM-Omni**. Runs on **2× H200** (to enable CFG-Parallel).
-- **NVIDIA's shipped techniques = what Part 1 reproduces & attributes** (each a toggle in `optimize`):
-  - *Reasoner:* KV cache, deferred sampling sync, torch.compile + CUDA graphs, fused/Flash attention, paged KV-cache, continuous batching, FP8/NVFP4 quantization, **EVS** (Efficient Video Sampling — token pruning for video inputs).
-  - *Generator:* reasoner-tower output caching, torch.compile + CUDA graphs, **CFG-Parallel** (cond/uncond on 2 GPUs), **Ulysses Context-Parallel** (alt 2-GPU strategy), Cache-DiT, FP8 quant, VAE-Patch-Parallel, request batching, **HSDP** + **CPU offload** (memory). All are selectable toggles; the latency waterfall shows only the latency-reducing subset (see §6).
+- **What Part 1 reproduces & attributes** (see §0 for why the Reasoner differs):
+  - *Reasoner:* **no technique toggles** — served by stock vLLM (paged KV-cache, continuous batching, fused attention, prefix caching, all default-on; §5.3.2). Characterized by a concurrency/shape sweep (TTFT + throughput), not an ablation. *(The report lists neither EVS nor "deferred sampling sync" in §5.3; both were dropped.)*
+  - *Generator:* reasoner-tower output caching, torch.compile + CUDA graphs, **CFG-Parallel** (cond/uncond on 2 GPUs), **Ulysses Context-Parallel** (alt 2-GPU strategy), Cache-DiT, FP8 quant, VAE-Patch-Parallel, request batching, **HSDP** + **CPU offload** (memory). All selectable toggles; the latency waterfall shows only the latency-reducing subset, batching is a throughput sweep (see §6).
 - **Part-2 new techniques:** 1–2 only, **lossless preferred** (any lossy one gets a quality guard). Candidates picked from the Part-1 breakdown (§14).
 
 ### Open-source components to reproduce
@@ -83,80 +108,81 @@ One mechanism serves reproduction, attribution, and the workbench.
 Each NVIDIA technique (§6) is an independent switch; presets bundle them.
 
 ```
-# Full NVIDIA package
+# Generator: full package / naïve baseline / hand-picked subset
 npa workbench cosmos optimize --tower generator --preset full
-# Naïve baseline (all off)
 npa workbench cosmos optimize --tower generator --preset none
-# Hand-pick a subset
 npa workbench cosmos optimize --tower generator \
     --enable reasoner-cache,cuda-graphs,cache-dit,fp8,vae-patch,cfg-parallel
-npa workbench cosmos optimize --tower reasoner \
-    --enable kv-cache,cuda-graphs,flash-attn,paged-kv,continuous-batching,fp8,evs
-# Run the cumulative ablation and emit the waterfall + breakdown
-npa workbench cosmos optimize --tower reasoner --ablate --output json
+# Generator: cumulative latency waterfall + Table 9 batching throughput
+npa workbench cosmos optimize --tower generator --ablate --output json
+# Reasoner: stock-vLLM concurrency/shape sweep (no toggles; §0)
+npa workbench cosmos optimize --tower reasoner --output json
 ```
 
-- `--preset full` = every NVIDIA technique for that tower; `--preset none` = naïve baseline; `--enable a,b,c` = explicit subset.
-- `--ablate` walks the canonical cumulative ladder (§6) and produces the contribution waterfall — i.e. the ablation *is* this command over subsets.
-- Lossy techniques (FP8/NVFP4, EVS, Cache-DiT) auto-trigger the quality guard (§ below).
+- **Generator only:** `--preset full` = every Generator technique; `--preset none` = naïve baseline; `--enable a,b,c` = explicit subset.
+- `--ablate` (Generator) walks the cumulative latency ladder (§6a) → contribution waterfall, and runs the batching sweep (§6b).
+- **Reasoner** takes no toggles — it runs the concurrency sweep (§6c).
+- Lossy techniques (FP8, Cache-DiT) auto-trigger the quality guard (§ below).
 
 ### Benchmark & workload — *fast to run, faithful to real latency*
 **Serving latency is shape-driven, not content-driven.** TTFT/TPOT/E2E depend on `(input_len, output_len, concurrency, #multimodal_tokens)` — not the actual words/pixels. So accuracy comes from **fixed representative shapes**, not a big dataset (that's only an occasional guard). This mirrors NVIDIA's `inference_benchmarks.md` (fixed `(in,out)` tokens × concurrency `1/64/128/256` → TTFT / latency / throughput).
 
-**Accurate attribution needs the regime where each technique acts** — one operating-point matrix, not one point:
+**Attribution needs the regime where each technique acts** — so we sweep input/output
+shape, not a single point (see §6 for the exact OPs):
 
-| OP | Shape | Reveals |
+| Experiment | Shapes swept | Reveals |
 |---|---|---|
-| **A — latency** | 1 req, short in/out | CUDA graphs, deferred sync |
-| **B — decode** | 1 req, long output | KV cache, quantization |
-| **C — throughput** | high concurrency (64/128/256) | paged KV-cache, continuous batching |
-| **D — multimodal (robot)** | **short video clip** in, short out | ViT encode, **EVS pruning** |
+| **Generator latency waterfall** | T2I-1024; T2V 256p/480p/720p; I2V-480 | CUDA graphs (T2I), reasoner-cache, Cache-DiT, FP8, VAE-patch, CFG-Parallel |
+| **Generator batching throughput** | T2V 256p (B≤6), 480p (B≤3) | request batching (Table 9) |
+| **Reasoner concurrency sweep** | text & video shapes × concurrency 1/64/128/256 | stock-vLLM TTFT + throughput (paged KV-cache, continuous batching) |
 
-Report **median + p95** over ≥N repeats after warmup (exclude init/compile). OP-D uses a small fixed set of short clips (video stresses EVS hardest) — no dataset download.
+Report **median + p95** over ≥N repeats after warmup (exclude init/compile).
 
-**Drivers (ready-made):** vLLM `benchmark_serving` / `vllm bench serve`; **NVIDIA GenAI-Perf**; `hw2 time_generation` for eager variants.
+**Drivers (ready-made):** vLLM-Omni timed generation (Generator); **NVIDIA AIPerf** (Reasoner sweep — TTFT + throughput at each concurrency).
 
-**Quality guard (occasional, not the loop):** lossless techniques → exact-match / tight numerical-equivalence; lossy (FP8/EVS/Cache-DiT) → a tiny fixed slice (VANTAGE-Bench prompts / Physics-IQ clips) checked once per variant for acceptable drift.
+**Quality guard (occasional, not the loop):** lossless techniques → exact-match / tight numerical-equivalence; lossy (FP8, Cache-DiT) → a tiny fixed slice checked once per variant for acceptable drift.
 
-**Net:** the Reasoner reproduction (≈8 techniques × 4 OPs × N) runs in **minutes on one GPU** — fast, and accurate because shapes are fixed and all four regimes are covered.
+**Net:** the Generator waterfall (6 techniques × 5 OPs × N) plus the batching and reasoner sweeps run in **minutes-to-hours on one/two GPUs** — fast, because shapes are fixed.
 
 ---
 
-## 6. Technique ladders (define both the toggles and the canonical waterfall order)
+## 6. Experiments (rewritten per §0)
 
-Cumulative order for the waterfall; the `optimize` interface still allows any subset.
+Three figures, mapped 1:1 onto the report's stated numbers. The `optimize` interface
+still allows any Generator technique subset via `--enable` / `--preset full`.
 
-### Reasoner ladder (Part 1a) — 1× H200
-| # | + technique | Path / toggle | OP |
-|---|---|---|---|
-| R0 | naïve HF eager, **no KV cache**, sync/step | eager (`hw2 slow_loop`) | A/B |
-| R1 | + `inference_mode` | eager | A/B |
-| R2 | + **KV cache** | eager | B |
-| R3 | + **deferred sampling sync** | eager | A/B |
-| R4 | + **torch.compile / CUDA graphs** | eager / vLLM (no `--enforce-eager`) | A |
-| R5 | + **FlashAttention / fused attention** | backend flag | A/B |
-| R6 | + **vLLM paged KV-cache + continuous batching** | vLLM (architectural) | C |
-| R7 | + **FP8 / NVFP4 quant** *(lossy→guard)* | vLLM `--quantization` | B/C |
-| R8 | + **EVS token pruning** *(lossy→guard)* | vLLM-Omni / Cosmos flag | D |
+### 6a. Generator latency waterfall (Part 1b) — the report's headline story
+Cumulative order (baseline = naïve PyTorch: recompute conditioning + sequential CFG).
+OPs: **t2i-1024 / t2v-256 / t2v-480 / i2v-480 / t2v-720**. Different rungs dominate at
+different points, which is the point of sweeping input/output shape.
 
-*R0–R5 cleanest in the readable eager path; R6+ in the vLLM engine (architectural ones attributed engine-vs-eager). Waterfall stitches both.*
-
-### Generator ladder (Part 1b) — 2× H200
-Cumulative **latency waterfall** (baseline recomputes conditioning + sequential CFG):
-| # | + technique | Category | Notes |
+| # | + technique | Category | Anchor / note |
 |---|---|---|---|
 | G0 | naïve PyTorch reference | — | recompute conditioning, sequential CFG |
-| G1 | + **reasoner-tower output caching** | latency | conditioning once |
-| G2 | + **torch.compile / CUDA graphs** | latency | host overhead (biggest on T2I) |
-| G3 | + **Cache-DiT** *(lossy→guard)* | latency | skip redundant block compute |
+| G1 | + **reasoner-tower output caching** | latency | conditioning invariant across steps → compute once |
+| G2 | + **torch.compile / CUDA graphs** | latency | **30–60% on T2I** (§5.3.1); host-launch-bound, fades on video |
+| G3 | + **Cache-DiT** *(lossy→guard)* | latency | reuse cached block outputs; more steps → more win |
 | G4 | + **FP8 quant** *(lossy→guard)* | latency | memory-bound denoise |
-| G5 | + **VAE-Patch-Parallel** | latency | shrinks decode tail |
-| G6 | + **request batching** | throughput | flat at B=1 (no latency benefit) |
-| G7 | + **CFG-Parallel (2 GPU)** | scaling | NVIDIA's; bar = adding a 2nd GPU, labeled as scaling. **End of Part 1.** |
+| G5 | + **VAE-Patch-Parallel** | latency | shrinks decode tail (bigger at high-res) |
+| G6 | + **CFG-Parallel (2 GPU)** | scaling | "nearly halves per-step latency" (§5.3.1). Bar = a 2nd GPU → labeled scaling (N4). **End of Part 1.** |
 | **P2** | **+ 1–2 NEW techniques (Part 2)** | — | picked from the breakdown; lossless preferred (§14) |
 
-Selectable but **off the latency waterfall** (in `--preset full` / `--enable`, not the ablation):
-**Ulysses Context-Parallel** (alt 2-GPU strategy, mutually exclusive with CFG-Parallel), **HSDP** + **CPU offload** (memory-reduction; CPU offload *adds* latency).
+Selectable but **off the latency waterfall** (`--enable` / `--preset full`, not `--ablate`):
+**Ulysses Context-Parallel** (alt 2-GPU strategy, mutually exclusive with CFG-Parallel),
+**request batching** (throughput — see 6b), **HSDP** + **CPU offload** (memory; CPU
+offload *adds* latency).
+
+### 6b. Generator batching throughput (Table 9)
+Batching amortizes per-step overhead → throughput, not per-clip latency, so it is a
+separate sweep: throughput at B=1 vs B=`batch_max` on **T2V 189-frame** at 256p
+(B≤6) and 480p (B≤3). Reproduces **Table 9** (256p 8–55%, 480p 1–5%). 720p is omitted —
+the 74k-token context admits only B=1.
+
+### 6c. Reasoner concurrency/shape sweep (Part 1a) — 1× H200
+No technique ladder (§0). Stock vLLM (paged KV-cache, continuous batching, fused
+attention, prefix caching all on by default), swept over **concurrency {1,64,128,256}**
+at fixed shapes (text `in=512,out=128`; video `in=4096,out=64`). Report **TTFT +
+aggregate throughput (tok/s)** per point — the `inference_benchmarks.md` methodology.
 
 ---
 

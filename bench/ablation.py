@@ -49,18 +49,13 @@ class AblationResult:
     def marginal_rows(self, op_name: str) -> list[dict]:
         """Per-variant rows with cumulative (vs V0) and marginal (vs prev) speedup.
 
-        Throughput techniques (e.g. continuous batching) act only under concurrency, so
-        on single-request OPs they're a no-op — drop them from that OP's waterfall so the
-        latency panels stay clean while the high-concurrency OPs still show the win."""
-        op = next((o for o in self.ops if o.name == op_name), None)
-        concurrency = op.concurrency if op else 1
+        The ladder is latency-only (memory + throughput techniques are excluded by
+        ablation_ladder), so every variant here reduces per-clip latency."""
         rows, base, prev = [], None, None
         for v in self.variants:
             key = (v.index, op_name)
             if key not in self.p50:
                 break                       # not measured yet (partial result)
-            if v.technique and v.technique.category == "throughput" and concurrency <= 1:
-                continue                    # throughput technique on a latency OP -> hide (no-op)
             ms = self.p50[key]
             base = ms if base is None else base
             vs0 = base / ms if ms else float("inf")
@@ -72,7 +67,6 @@ class AblationResult:
                 "vs_prev": round(vsp, 2),
                 "lossy": bool(v.technique and v.technique.lossy),
                 "scaling": bool(v.technique and v.technique.scaling),
-                "default_on": bool(v.technique and v.technique.default_on),
             })
             prev = ms
         return rows
@@ -129,10 +123,8 @@ def run_ablation(tower: str, *, backend: str = "mock",
                  ops: list[OperatingPoint] | None = None,
                  repeats: int = 10, model: str | None = None,
                  port: int = 8000, on_variant=None) -> AblationResult:
-    ladder = ablation_ladder(tower, backend)
+    ladder = ablation_ladder(tower)
     ops = ops or ops_for(tower)
-    if backend == "eager":
-        ops = [op for op in ops if op.concurrency == 1]   # eager is single-request only (skip C/F)
 
     variants = [Variant(0, _baseline_label(tower), None, ())]
     for i, tech in enumerate(ladder, start=1):
