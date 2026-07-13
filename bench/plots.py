@@ -13,6 +13,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from bench.ablation import AblationResult
 
@@ -22,6 +23,18 @@ COLOR_LOSSY = "#8cc5e3"    # lossy (quality-guarded) — light blue
 COLOR_SCALING = "#298c8c"  # scaling / multi-GPU (e.g. CFG-Parallel) — teal
 COLOR_ANNOT = "black"      # contribution (%) labels
 COLOR_GRID = "#d9d9d9"
+COLOR_STOCK = "#555555"    # "stock vLLM" reference line (end of the default-on prefix)
+
+
+def _stock_index(rows_data: list[dict]) -> int:
+    """Index of the last variant in the contiguous run of vLLM default-on techniques
+    (i.e. the cumulative 'stock vLLM' config). 0 if there is no such prefix."""
+    k = 0
+    for i in range(1, len(rows_data)):
+        if not rows_data[i].get("default_on"):
+            break
+        k = i
+    return k
 
 
 def _bar_color(row: dict) -> str:
@@ -46,6 +59,7 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
     fig.suptitle(title or f"Cosmos 3 {result.tower.title()} — technique contribution "
                           f"(backend={result.backend})", fontsize=14, y=0.99)
 
+    drew_stock = False
     for idx, op in enumerate(ops):
         ax = axes[idx // cols][idx % cols]
         rows_data = result.marginal_rows(op.name)
@@ -65,6 +79,16 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
             ax.annotate(txt, (i, lat[i]), textcoords="offset points", xytext=(0, 4),
                         ha="center", fontsize=7, color=COLOR_ANNOT)
 
+        # "stock vLLM" line: cumulative latency after the default-on features. Bars at/left
+        # of it are what vLLM ships enabled; bars to the right are opt-in latency wins (FP8).
+        k = _stock_index(rows_data)
+        if k:
+            drew_stock = True
+            ax.axhline(lat[k], color=COLOR_STOCK, linestyle="--", linewidth=1.0, zorder=4)
+            ax.annotate("stock vLLM", (len(labels) - 1, lat[k]), textcoords="offset points",
+                        xytext=(0, 3), ha="right", va="bottom", fontsize=7,
+                        color=COLOR_STOCK, fontstyle="italic")
+
         ax.set_title(op.label(), fontsize=11)
         ax.set_ylabel("latency (ms)")
         ax.set_xticks(list(x))
@@ -82,8 +106,12 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
     if any(r["scaling"] for r in all_rows):
         legend_items.append((COLOR_SCALING, "scaling (multi-GPU)"))
     handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c, _ in legend_items]
-    fig.legend(handles, [lbl for _, lbl in legend_items],
-               loc="lower center", ncol=len(legend_items), fontsize=10, frameon=False)
+    labels_l = [lbl for _, lbl in legend_items]
+    if drew_stock:                                    # dashed reference line -> Line2D handle
+        handles.append(Line2D([0], [0], color=COLOR_STOCK, linestyle="--"))
+        labels_l.append("stock vLLM (defaults on)")
+    fig.legend(handles, labels_l,
+               loc="lower center", ncol=len(handles), fontsize=10, frameon=False)
 
     plt.tight_layout(rect=(0, 0.03, 1, 0.97))
     out = Path(out_path)

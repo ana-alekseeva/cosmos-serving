@@ -32,6 +32,8 @@ class Technique:
     scaling: bool = False      # True -> uses extra GPUs (e.g. CFG-Parallel): a scaling win, not per-GPU
     category: str = "latency"  # latency | scaling | throughput | memory
     group: str = ""            # non-empty -> mutually-exclusive alternatives (one per group on N GPUs)
+    default_on: bool = False   # True -> vLLM ships this ENABLED; naive baseline disables it. The
+                               # contiguous default_on prefix of the ladder == the stock-vLLM config.
 
 
 # ---------------------------------------------------------------------------
@@ -45,20 +47,24 @@ class Technique:
 REASONER_TECHNIQUES: list[Technique] = [
     Technique("cuda-graphs", "torch.compile + CUDA graphs", REASONER, False, "A",
               {"vllm": {"enforce_eager": False}},
-              {"A": 3.35, "B": 3.40, "C": 3.08, "D": 2.51, "E": 3.12, "F": 1.16}),
+              {"A": 3.35, "B": 3.40, "C": 3.08, "D": 2.51, "E": 3.12, "F": 1.16},
+              default_on=True),
     Technique("flash-attn", "FlashAttention (vs SDPA)", REASONER, False, "B",
               {"env": {"VLLM_ATTENTION_BACKEND": "FLASH_ATTN"}},
-              {"A": 1.20, "B": 1.60, "C": 1.40, "D": 1.50, "E": 1.40, "F": 1.50}),
+              {"A": 1.20, "B": 1.60, "C": 1.40, "D": 1.50, "E": 1.40, "F": 1.50},
+              default_on=True),
     Technique("prefix-caching", "prefix caching", REASONER, False, "C",
               {"vllm": {"enable_prefix_caching": True}},
-              {"A": 1.02, "B": 1.02, "C": 1.05, "D": 1.02, "E": 1.02, "F": 1.05}),
+              {"A": 1.02, "B": 1.02, "C": 1.05, "D": 1.02, "E": 1.02, "F": 1.05},
+              default_on=True),
     Technique("chunked-prefill", "chunked prefill", REASONER, False, "D",
               {"vllm": {"enable_chunked_prefill": True}},
-              {"A": 1.05, "B": 1.05, "C": 1.10, "D": 1.20, "E": 1.15, "F": 1.20}),
+              {"A": 1.05, "B": 1.05, "C": 1.10, "D": 1.20, "E": 1.15, "F": 1.20},
+              default_on=True),
     Technique("continuous-batching", "continuous batching (max-num-seqs)", REASONER, False, "C",
               {"vllm": {"max_num_seqs": ">1"}},
               {"A": 1.00, "B": 1.00, "C": 3.00, "D": 1.00, "E": 1.00, "F": 2.50},
-              category="throughput"),
+              category="throughput", default_on=True),   # vLLM batches by default; part of "stock vLLM"
     Technique("fp8", "FP8 / NVFP4 quantization", REASONER, True, "F",
               {"vllm": {"quantization": "fp8"}},
               {"A": 1.36, "B": 1.38, "C": 1.22, "D": 1.26, "E": 1.23, "F": 1.36}),
@@ -174,7 +180,9 @@ EAGER_REASONER_TECHNIQUES: list[Technique] = [
 def ablation_ladder(tower: str, backend: str = "vllm") -> list[Technique]:
     """Cumulative waterfall order. The eager backend uses the reference-path ladder
     (the fundamentals vLLM can't toggle); everyone else uses the full stack minus
-    memory-only techniques (which don't reduce single-request latency)."""
+    memory-only techniques (which never reduce latency). Throughput techniques
+    (e.g. continuous batching) STAY in the ladder but are rendered per-OP: they only
+    appear on high-concurrency OPs, where they act (see AblationResult.marginal_rows)."""
     if tower == REASONER and backend == "eager":
         return list(EAGER_REASONER_TECHNIQUES)
     return [t for t in full_stack(tower) if t.category != "memory"]

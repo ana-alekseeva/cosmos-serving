@@ -37,12 +37,20 @@ class AblationResult:
         return [self.p50[(v.index, op_name)] for v in self.variants]
 
     def marginal_rows(self, op_name: str) -> list[dict]:
-        """Per-variant rows with cumulative (vs V0) and marginal (vs prev) speedup."""
+        """Per-variant rows with cumulative (vs V0) and marginal (vs prev) speedup.
+
+        Throughput techniques (e.g. continuous batching) act only under concurrency, so
+        on single-request OPs they're a no-op — drop them from that OP's waterfall so the
+        latency panels stay clean while the high-concurrency OPs still show the win."""
+        op = next((o for o in self.ops if o.name == op_name), None)
+        concurrency = op.concurrency if op else 1
         rows, base, prev = [], None, None
         for v in self.variants:
             key = (v.index, op_name)
             if key not in self.p50:
                 break                       # not measured yet (partial result)
+            if v.technique and v.technique.category == "throughput" and concurrency <= 1:
+                continue                    # throughput technique on a latency OP -> hide (no-op)
             ms = self.p50[key]
             base = ms if base is None else base
             vs0 = base / ms if ms else float("inf")
@@ -54,6 +62,7 @@ class AblationResult:
                 "vs_prev": round(vsp, 2),
                 "lossy": bool(v.technique and v.technique.lossy),
                 "scaling": bool(v.technique and v.technique.scaling),
+                "default_on": bool(v.technique and v.technique.default_on),
             })
             prev = ms
         return rows
