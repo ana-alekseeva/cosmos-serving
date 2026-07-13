@@ -131,30 +131,60 @@ def _request_latencies(out_dir: Path) -> list[float]:
     return out
 
 
+# vLLM-Omni generation endpoints (from the live server's OpenAPI):
+#   image  -> POST /v1/images/generations  (JSON, returns data[0].b64_json)
+#   video  -> POST /v1/videos/sync         (multipart/form-data, returns the MP4 directly)
+GEN_PROMPT = "a robot arm picking up a red cube on a table"
+GEN_FPS = 24   # report: 189 frames @ 24 FPS
+
+
+def _size_for(op: OperatingPoint) -> str:
+    """Resolution tag -> "WxH". VERIFY Cosmos3's supported sizes per tier (a 400 lists them)."""
+    return {"1024px": "1024x1024", "256p": "256x256",
+            "480p": "832x480", "720p": "1280x720"}.get(op.clip_resolution, "512x512")
+
+
+def _encode_multipart(fields: dict) -> tuple[bytes, str]:
+    """Minimal multipart/form-data encoder (stdlib only) for scalar form fields."""
+    boundary = "----cosmosbench7f3a2b"
+    body = b""
+    for k, v in fields.items():
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f'name="{k}"\r\n\r\n{v}\r\n').encode()
+    body += f"--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
+def _generate_once(base_url: str, model: str, op: OperatingPoint) -> None:
+    """One blocking generation, timed by the caller. Reads the full response so the
+    elapsed time is the full generation (both endpoints return the finished media)."""
+    if op.modality == "image":
+        body = json.dumps({"model": model, "prompt": GEN_PROMPT, "n": 1,
+                           "size": _size_for(op), "seed": 0}).encode()
+        req = urllib.request.Request(f"{base_url}/v1/images/generations", data=body,
+                                     headers={"Content-Type": "application/json"})
+    else:
+        # T2V / I2V -> synchronous video endpoint (multipart). VERIFY: true I2V (i2v-*) wants
+        # an `image_reference` file part; we send text->video at the same size/frames, whose
+        # denoise cost is ~identical, so the latency benchmark holds. 189 frames @ 24 FPS.
+        fields = {"model": model, "prompt": GEN_PROMPT, "size": _size_for(op),
+                  "num_frames": op.clip_frames, "fps": GEN_FPS, "seed": 0}
+        body, ctype = _encode_multipart(fields)
+        req = urllib.request.Request(f"{base_url}/v1/videos/sync", data=body,
+                                     headers={"Content-Type": ctype})
+    with urllib.request.urlopen(req, timeout=3600) as r:
+        r.read()
+
+
 def time_generation_request(base_url: str, model: str, op: OperatingPoint,
                             *, repeats: int = 5, warmup: int = 1) -> dict:
     """Generator latency: wall-clock per clip over `repeats` (fixed prompt/seed)."""
-    payload = json.dumps({
-        "model": model,
-        "prompt": "a robot arm picking up a red cube on a table",   # fixed prompt/seed
-        "seed": 0,
-        "resolution": op.clip_resolution,                            # VERIFY payload schema
-        "num_frames": op.clip_frames,
-    }).encode()
-
-    def _one() -> None:
-        req = urllib.request.Request(f"{base_url}/v1/generate",       # VERIFY endpoint path
-                                     data=payload,
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=3600) as r:
-            r.read()
-
     for _ in range(warmup):
-        _one()
+        _generate_once(base_url, model, op)
     samples_ms: list[float] = []
     for _ in range(repeats):
         t0 = time.perf_counter()
-        _one()
+        _generate_once(base_url, model, op)
         samples_ms.append((time.perf_counter() - t0) * 1e3)
 
     trace = [round(s, 3) for s in samples_ms]   # raw per-repeat order for the full trace
@@ -168,29 +198,14 @@ def measure_generation_throughput(base_url: str, model: str, op: OperatingPoint,
     """Generator throughput (clips/s) at a given batch size, for the batching sweep.
 
     Fires `batch` generation requests concurrently and times the whole wave; vLLM-Omni
-    continuous-batches / seq-packs them (report §5.3.1). Returns clips/s = requests / wall.
+    continuous-batches them (report §5.3.1). Returns clips/s = requests / wall.
     """
     import concurrent.futures as cf
-
-    payload = json.dumps({
-        "model": model,
-        "prompt": "a robot arm picking up a red cube on a table",
-        "seed": 0,
-        "resolution": op.clip_resolution,                            # VERIFY payload schema
-        "num_frames": op.clip_frames,
-    }).encode()
-
-    def _one(_i: int) -> None:
-        req = urllib.request.Request(f"{base_url}/v1/generate",       # VERIFY endpoint path
-                                     data=payload,
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=3600) as r:
-            r.read()
 
     def _wave() -> float:
         t0 = time.perf_counter()
         with cf.ThreadPoolExecutor(max_workers=batch) as ex:
-            list(ex.map(_one, range(batch)))
+            list(ex.map(lambda _i: _generate_once(base_url, model, op), range(batch)))
         return time.perf_counter() - t0
 
     for _ in range(warmup):
