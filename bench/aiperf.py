@@ -22,11 +22,22 @@ from pathlib import Path
 from bench.workload import OperatingPoint
 
 
+# Requests needed for a steady-state throughput/latency read scale with concurrency: send
+# enough to cycle every concurrency slot several times over, not a flat count. At concurrency 1
+# this collapses to the caller's floor (single-request OPs are unaffected).
+STEADY_STATE_WAVES = 4
+
+
 def run_aiperf(base_url: str, model: str, op: OperatingPoint,
                *, warmup: int = 2, request_count: int = 50) -> dict:
-    """Reasoner latency via AIPerf at the OP's fixed shape + concurrency."""
+    """Reasoner latency via AIPerf at the OP's fixed shape + concurrency.
+
+    `request_count` is a FLOOR; high-concurrency OPs are bumped to STEADY_STATE_WAVES ×
+    concurrency so the measured window reflects steady state, not a half-filled ramp.
+    """
     if shutil.which("aiperf") is None:
         raise RuntimeError("`aiperf` not found — install it on the GPU host (deploy/setup_gpu.sh).")
+    n_requests = max(request_count, STEADY_STATE_WAVES * op.concurrency)
     out_dir = Path(tempfile.mkdtemp(prefix="aiperf-"))
     cmd = [
         "aiperf", "profile",
@@ -37,7 +48,7 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
         "--output-tokens-mean", str(op.output_tokens),
         "--extra-inputs", "ignore_eos:true",   # fixed output length -> comparable across variants
         "--concurrency", str(op.concurrency),
-        "--request-count", str(request_count),
+        "--request-count", str(n_requests),
         "--warmup-request-count", str(warmup),
         "--artifact-dir", str(out_dir),
     ]
