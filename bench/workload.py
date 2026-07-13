@@ -63,10 +63,14 @@ GENERATOR_OPS: list[OperatingPoint] = [
                    input_tokens=0, output_tokens=0, concurrency=1,
                    modality="video", baseline_latency_ms=84_000.0,
                    clip_frames=189, clip_resolution="480p", batch_max=3),
-    OperatingPoint("t2v-720", GENERATOR, "T2V 720p, 189 frames (headline)",
-                   input_tokens=0, output_tokens=0, concurrency=1,
-                   modality="video", baseline_latency_ms=240_000.0,
-                   clip_frames=189, clip_resolution="720p", batch_max=1),
+    # t2v-720 disabled by default: ~240 s/clip baseline -> ~1.5-2 h alone, ~half the whole
+    # ablation. The registry keeps its t2v-720 mock speedups, so re-enable this line for the
+    # headline pass (or run it standalone once vLLM-Omni is up). Batching omits 720p anyway
+    # (74k-token context admits only B=1).
+    # OperatingPoint("t2v-720", GENERATOR, "T2V 720p, 189 frames (headline)",
+    #                input_tokens=0, output_tokens=0, concurrency=1,
+    #                modality="video", baseline_latency_ms=240_000.0,
+    #                clip_frames=189, clip_resolution="720p", batch_max=1),
 ]
 
 # Report Table 9 — throughput gain (%) from request batching on the T2V task (189
