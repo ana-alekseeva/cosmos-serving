@@ -18,12 +18,11 @@ from bench.workload import OperatingPoint
 from optimize.registry import GENERATOR, REASONER, Technique
 
 # Mock reasoner model constants (illustrative — real numbers come from AIPerf on the H200).
-# Anchored to the report's ballpark: ~2,800 tok/s at high concurrency, low tens-of-ms TTFT.
-_PEAK_TOK_S = 3000.0        # aggregate decode throughput ceiling
-_TOK_S_HALF = 40.0          # concurrency at which throughput reaches half of peak
-_PREFILL_BASE_MS = 20.0     # fixed prefill overhead
-_PREFILL_PER_TOK_MS = 0.008
-_VISION_ENCODE_MS = 35.0    # extra prefill for image/video inputs (ViT encode)
+# Anchored to the report's ballpark: low tens-of-ms TTFT at c1, throughput growing with
+# concurrency. Not meant to match H200 numbers — only to exercise plots/tests without a GPU.
+_PREFILL_BASE_MS = 15.0     # fixed prefill overhead
+_PREFILL_PER_TOK_MS = 0.010
+_VISION_TOK_PER_FRAME = 200  # synthetic vision tokens added per input frame
 _TPOT_BASE_MS = 4.0         # per-output-token decode time at concurrency 1
 
 
@@ -32,9 +31,10 @@ class Measurement:
     op: str
     p50_ms: float
     p95_ms: float
-    samples_ms: tuple[float, ...] = ()   # raw per-repeat latencies (empty if the backend can't expose them)
-    ttft_ms: float = 0.0                 # reasoner sweep: time-to-first-token
-    throughput_tok_s: float = 0.0        # reasoner sweep: aggregate decode throughput
+    samples_ms: tuple[float, ...] = ()      # raw per-repeat latencies (empty if the backend can't expose them)
+    ttft_ms: float = 0.0                     # reasoner sweep: time-to-first-token
+    throughput_tok_s: float = 0.0            # reasoner sweep: aggregate output-token throughput (out=100 regime)
+    req_throughput_req_s: float = 0.0        # reasoner sweep: request throughput (out=1 / captioning regime)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -43,20 +43,23 @@ class Measurement:
 def _mock_reasoner(op: OperatingPoint) -> Measurement:
     """Analytic TTFT / throughput / per-request latency vs shape + concurrency.
 
-    Continuous batching: TTFT rises modestly with concurrency (queueing); aggregate
-    throughput saturates toward a peak; per-request TPOT grows as the GPU is shared."""
+    Continuous batching: TTFT rises modestly with concurrency (queueing); the effective
+    input includes synthetic vision tokens for image/video (so heavier media -> higher
+    TTFT); aggregate throughput rises with concurrency. Reports both request throughput
+    (req/s, the out=1 regime) and output-token throughput (tok/s, the out=100 regime)."""
     conc = max(1, op.concurrency)
     log2c = math.log2(conc)
-    prefill = _PREFILL_BASE_MS + _PREFILL_PER_TOK_MS * op.input_tokens
-    if op.modality != "text":
-        prefill += _VISION_ENCODE_MS
+    eff_input = op.input_tokens + op.clip_frames * _VISION_TOK_PER_FRAME
+    prefill = _PREFILL_BASE_MS + _PREFILL_PER_TOK_MS * eff_input
     ttft = prefill * (1.0 + 0.15 * log2c)
-    tput = _PEAK_TOK_S * conc / (conc + _TOK_S_HALF)
     tpot = _TPOT_BASE_MS * (1.0 + 0.10 * log2c)
     p50 = ttft + op.output_tokens * tpot
+    req_s = conc * 1000.0 / p50                  # aggregate requests/s (pipelined across the batch)
+    tok_s = op.output_tokens * req_s             # aggregate output tokens/s
     return Measurement(op.name, round(p50, 3), round(p50 * 1.15, 3),
                        samples_ms=(round(p50, 3),),
-                       ttft_ms=round(ttft, 3), throughput_tok_s=round(tput, 1))
+                       ttft_ms=round(ttft, 3), throughput_tok_s=round(tok_s, 1),
+                       req_throughput_req_s=round(req_s, 2))
 
 
 class MockEngine:
@@ -128,7 +131,8 @@ class VLLMEngine:
         return Measurement(op.name, round(r["p50_ms"], 3), round(r["p95_ms"], 3),
                            tuple(r.get("samples_ms", ())),
                            ttft_ms=round(r.get("ttft_ms", 0.0), 3),
-                           throughput_tok_s=round(r.get("throughput_tok_s", 0.0), 1))
+                           throughput_tok_s=round(r.get("throughput_tok_s", 0.0), 1),
+                           req_throughput_req_s=round(r.get("req_throughput_req_s", 0.0), 2))
 
     def close(self) -> None:
         if self._server is not None:

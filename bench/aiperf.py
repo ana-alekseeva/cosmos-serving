@@ -53,18 +53,26 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
         "--streaming",                          # required for a per-request TTFT measurement
         "--artifact-dir", str(out_dir),
     ]
-    if op.modality != "text":
-        # VERIFY: multimodal (image/video) input needs AIPerf media config or a fixed
-        # sample clip; synthetic text tokens alone won't exercise the ViT / EVS path.
-        cmd += ["--image-width-mean", "256", "--image-height-mean", "256"]
-    if op.shared_prefix_tokens > 0:
-        # Fleet regime: prepend ONE shared prefix (pool size 1) to every request so prefix caching
-        # has a common prefix to reuse. Without it AIPerf sends unique prompts and APC measures 0%.
-        # VERIFY flag names on-box: `aiperf profile --help | grep -i prefix` — some builds use
-        # --shared-system-prompt-length instead of --num-prefix-prompts/--prefix-prompt-length.
-        cmd += ["--num-prefix-prompts", "1", "--prefix-prompt-length", str(op.shared_prefix_tokens)]
+    if op.modality == "image":
+        w, h = _res_to_wh(op.clip_resolution)
+        # VERIFY: default is 1 image/request; confirm the flag that sets image count if needed.
+        cmd += ["--image-width-mean", str(w), "--image-height-mean", str(h)]
+    elif op.modality == "video":
+        w, h = _res_to_wh(op.clip_resolution)
+        # VERIFY on-box: AIPerf's synthetic-VIDEO support + exact flags. `clip_frames` encodes
+        # the 1-vs-2 FPS distinction (NVIDIA "Video 1/2 FPS"). If AIPerf can't synthesize video,
+        # supply a fixed sample clip of `op.clip_frames` frames at (w,h) via --input-file, or pass
+        # the frame count through to the request with an extra input.
+        cmd += ["--image-width-mean", str(w), "--image-height-mean", str(h),
+                "--extra-inputs", f"num_frames:{op.clip_frames}"]   # VERIFY payload key
     subprocess.run(cmd, check=True)
     return _parse_aiperf(out_dir)
+
+
+def _res_to_wh(res: str) -> tuple[int, int]:
+    """Map an OP resolution tag to (width, height) for the synthetic frame. VERIFY dims."""
+    return {"256p": (456, 256), "512px": (512, 512),
+            "480p": (854, 480), "720p": (1280, 720)}.get(res, (256, 256))
 
 
 def _parse_aiperf(out_dir: Path) -> dict:
@@ -76,14 +84,17 @@ def _parse_aiperf(out_dir: Path) -> dict:
     # AIPerf schema: request_latency = {unit, avg, p1..p99, min, max, std, count, sum}
     lat = data.get("request_latency", {})
     ttft = data.get("time_to_first_token", {})   # absent for non-streaming; TTFT sweep needs streaming
-    # aggregate decode throughput (tok/s) — the reasoner sweep's throughput axis.
-    # VERIFY key on-box: recent AIPerf uses "output_token_throughput" ({unit:"tokens/sec", avg}).
+    # aggregate throughput — the sweep's two throughput axes (output-token for out=100,
+    # request for out=1). VERIFY keys on-box: recent AIPerf uses "output_token_throughput"
+    # and "request_throughput" ({unit, avg}).
     tput = data.get("output_token_throughput", {})
+    reqput = data.get("request_throughput", {})
     return {
         "p50_ms": float(lat.get("p50", 0.0)),
         "p95_ms": float(lat.get("p95", 0.0)),
         "ttft_ms": float(ttft.get("p50", 0.0)) if isinstance(ttft, dict) else 0.0,
         "throughput_tok_s": float(tput.get("avg", 0.0)) if isinstance(tput, dict) else 0.0,
+        "req_throughput_req_s": float(reqput.get("avg", 0.0)) if isinstance(reqput, dict) else 0.0,
         "samples_ms": _request_latencies(out_dir),
     }
 

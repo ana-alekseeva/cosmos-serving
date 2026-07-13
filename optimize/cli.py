@@ -69,7 +69,14 @@ def optimize_cmd(
         if preset or enable or ablate:
             typer.secho("note: the reasoner is served by stock vLLM (§5.3.2) — it has no "
                         "technique toggles; running the concurrency sweep.", fg=typer.colors.YELLOW, err=True)
-        result = run_reasoner_sweep(backend=backend, model=model, port=port, repeats=repeats)
+        # --op is a substring filter over OP names (e.g. "vid" = both video shapes; "o100" =
+        # all output-100 points; "vid1-o100-c256" = one point). Default: the full 32-point sweep.
+        sweep_ops = ops_for(REASONER)
+        if op:
+            sweep_ops = [o for o in sweep_ops if op in o.name]
+            if not sweep_ops:
+                _fail(f"--op {op!r} matched no reasoner OPs; try a substring like 'vid', 'txt', 'o100'")
+        result = run_reasoner_sweep(backend=backend, ops=sweep_ops, model=model, port=port, repeats=repeats)
         from bench.plots import plot_reasoner_sweep
         png = plot_reasoner_sweep(result, out_dir / "reasoner_sweep.png")
         js = out_dir / "reasoner_sweep.json"

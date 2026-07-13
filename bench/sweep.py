@@ -17,30 +17,43 @@ from bench.workload import (
     OperatingPoint,
     op_by_name,
     ops_for,
-    reasoner_shape_keys,
 )
 from optimize.registry import GENERATOR, REASONER
 
 
 # ---------------------------------------------------------------------------
-# Reasoner concurrency / shape sweep
+# Reasoner concurrency / shape sweep (1:1 with inference_benchmarks.md)
 # ---------------------------------------------------------------------------
 @dataclass
 class ReasonerSweepResult:
     backend: str
-    shapes: list[str]                          # e.g. ["txt", "vid"]
+    shapes: list[str]                          # family+output keys, e.g. ["txt-o1", "vid1-o100", ...]
     concurrencies: list[int]
-    points: dict = field(default_factory=dict)  # op_name -> {shape, concurrency, ttft_ms, throughput_tok_s, p50_ms, p95_ms}
+    points: dict = field(default_factory=dict)  # op_name -> {shape, family, output_tokens, modality, concurrency, ttft_ms, throughput_tok_s, req_throughput_req_s, p50_ms, p95_ms}
 
     def curve(self, shape: str, metric: str) -> list[tuple[int, float]]:
-        """(concurrency, metric) pairs for one shape, ordered by concurrency."""
+        """(concurrency, metric) pairs for one shape key, ordered by concurrency."""
         pts = [p for p in self.points.values() if p["shape"] == shape]
         return [(p["concurrency"], p[metric]) for p in sorted(pts, key=lambda p: p["concurrency"])]
+
+    def curve_fo(self, family: str, output_tokens: int, metric: str) -> list[tuple[int, float]]:
+        """(concurrency, metric) for one modality family at one output length."""
+        pts = [p for p in self.points.values()
+               if p["family"] == family and p["output_tokens"] == output_tokens]
+        return [(p["concurrency"], p[metric]) for p in sorted(pts, key=lambda p: p["concurrency"])]
+
+    def families(self) -> list[str]:
+        return list(dict.fromkeys(p["family"] for p in self.points.values()))
+
+    def output_lengths(self) -> list[int]:
+        return sorted({p["output_tokens"] for p in self.points.values()})
 
     def to_dict(self) -> dict:
         return {
             "experiment": "reasoner_concurrency_sweep",
             "backend": self.backend,
+            "note": "1:1 with NVIDIA/cosmos inference_benchmarks.md: input=50, output {1,100}, "
+                    "concurrency {1,64,128,256}. NVIDIA benchmarks video only; text/image added here.",
             "shapes": self.shapes,
             "concurrencies": self.concurrencies,
             "points": self.points,
@@ -48,7 +61,11 @@ class ReasonerSweepResult:
 
 
 def _shape_of(op_name: str) -> str:
-    return op_name.split("-c")[0]
+    return op_name.split("-c")[0]          # "vid1-o100-c64" -> "vid1-o100"
+
+
+def _family_of(shape: str) -> str:
+    return shape.split("-o")[0]            # "vid1-o100" -> "vid1"
 
 
 def run_reasoner_sweep(*, backend: str = "mock", ops: list[OperatingPoint] | None = None,
@@ -56,24 +73,27 @@ def run_reasoner_sweep(*, backend: str = "mock", ops: list[OperatingPoint] | Non
                        on_point=None) -> ReasonerSweepResult:
     ops = ops or ops_for(REASONER)
     concs = sorted({op.concurrency for op in ops})
-    result = ReasonerSweepResult(backend=backend, shapes=reasoner_shape_keys(),
-                                 concurrencies=concs)
+    shapes = list(dict.fromkeys(_shape_of(op.name) for op in ops))
+    result = ReasonerSweepResult(backend=backend, shapes=shapes, concurrencies=concs)
     engine = make_engine(backend, [], tower=REASONER, model=model, port=port)  # stock vLLM: no techniques
     if backend != "mock":
         print(f"» reasoner sweep: stock vLLM, {len(ops)} points "
-              f"(shapes {result.shapes} x concurrency {concs})", flush=True)
+              f"({len(shapes)} shapes x concurrency {concs})", flush=True)
     engine.prepare()
     try:
         for op in ops:
             m = engine.measure(op, repeats=repeats)
+            shape = _shape_of(op.name)
             result.points[op.name] = {
-                "shape": _shape_of(op.name), "concurrency": op.concurrency,
+                "shape": shape, "family": _family_of(shape), "output_tokens": op.output_tokens,
+                "modality": op.modality, "concurrency": op.concurrency,
                 "ttft_ms": m.ttft_ms, "throughput_tok_s": m.throughput_tok_s,
+                "req_throughput_req_s": m.req_throughput_req_s,
                 "p50_ms": m.p50_ms, "p95_ms": m.p95_ms,
             }
             if backend != "mock":
-                print(f"    {op.name}: TTFT={m.ttft_ms:.0f}ms  "
-                      f"tput={m.throughput_tok_s:.0f} tok/s  p50={m.p50_ms:.0f}ms", flush=True)
+                print(f"    {op.name}: TTFT={m.ttft_ms:.0f}ms  lat={m.p50_ms:.0f}ms  "
+                      f"tput={m.throughput_tok_s:.0f} tok/s  {m.req_throughput_req_s:.1f} req/s", flush=True)
             if on_point is not None:
                 on_point(result, op)
     finally:
@@ -135,15 +155,18 @@ def run_batching_sweep(*, backend: str = "mock", model: str | None = None,
 
 
 def print_reasoner_sweep(result: ReasonerSweepResult) -> None:
+    """One table per shape (mirrors inference_benchmarks.md: TTFT, request latency,
+    token throughput, request throughput vs concurrency)."""
     for shape in result.shapes:
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 66)
         print(f"[reasoner] shape={shape}   (backend={result.backend})")
-        print("=" * 60)
-        print(f"{'conc':>6}{'TTFT ms':>12}{'tok/s':>12}{'p50 ms':>12}")
-        print("-" * 42)
+        print("=" * 66)
+        print(f"{'conc':>6}{'TTFT ms':>12}{'latency ms':>12}{'tok/s':>12}{'req/s':>12}")
+        print("-" * 54)
         for conc, ttft in result.curve(shape, "ttft_ms"):
             pt = result.points[f"{shape}-c{conc}"]
-            print(f"{conc:>6}{ttft:>12.1f}{pt['throughput_tok_s']:>12.0f}{pt['p50_ms']:>12.1f}")
+            print(f"{conc:>6}{ttft:>12.1f}{pt['p50_ms']:>12.1f}"
+                  f"{pt['throughput_tok_s']:>12.0f}{pt['req_throughput_req_s']:>12.1f}")
 
 
 def print_batching_sweep(result: BatchingSweepResult) -> None:

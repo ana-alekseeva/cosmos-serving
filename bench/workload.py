@@ -32,7 +32,6 @@ class OperatingPoint:
     baseline_latency_ms: float    # naive-baseline per-clip latency (generator mock anchor; unused for reasoner)
     clip_frames: int = 0
     clip_resolution: str = ""
-    shared_prefix_tokens: int = 0  # >0 -> a shared system prompt across requests (reasoner fleet regime)
     batch_max: int = 1             # generator: max admissible batch under the 74k-token context (Table 9)
 
     def label(self) -> str:
@@ -80,30 +79,48 @@ BATCHING_TABLE9: dict[str, dict[str, int]] = {
 
 # ---------------------------------------------------------------------------
 # Reasoner (Part 1a) — stock-vLLM concurrency/shape sweep (§5.3.2). Not a technique
-# ablation: the report inherits Qwen3-VL serving from vLLM out of the box, so we simply
-# characterize TTFT + throughput across concurrency at fixed shapes (à la
-# inference_benchmarks.md). Two shapes x concurrency {1, 64, 128, 256}.
+# ablation: the report inherits Qwen3-VL serving from vLLM out of the box, so we
+# characterize TTFT + throughput across concurrency at fixed shapes.
+#
+# 1:1 with NVIDIA/cosmos inference_benchmarks.md: fixed **input=50** tokens, output
+# **1** (captioning — request-latency/req-s regime) and **100** (VQA — token-throughput
+# regime), concurrency {1,64,128,256}, BF16 / batch-1, measured with AIPerf. NVIDIA
+# benchmarks only *video* (1 & 2 FPS); we reproduce those and additionally cover
+# **text** and **image** inputs (the report's shapes don't include them).
+#
+# The 4 shape families = one curve each on the sweep plot:
+#   txt  — text only (no media)
+#   img  — one image
+#   vid1 — video @ ~1 FPS   (NVIDIA "Video 1 FPS")
+#   vid2 — video @ ~2 FPS   (NVIDIA "Video 2 FPS")
+# VERIFY on-box: NVIDIA does not publish the clip duration / resolution, so the exact
+# FPS->frame counts and image resolution below are best-effort — confirm against the
+# actual benchmark media to make the video vision-token count bit-exact.
 # ---------------------------------------------------------------------------
 REASONER_CONCURRENCIES: tuple[int, ...] = (1, 64, 128, 256)
+REASONER_OUTPUTS: tuple[int, ...] = (1, 100)   # NVIDIA: output 1 (captioning) and 100 (VQA)
+REASONER_INPUT_TOKENS = 50                     # NVIDIA fixed text-prompt length
 
-# (shape_key, description, input_tokens, output_tokens, modality, clip_frames, resolution)
+# (family, modality, clip_frames, resolution, fps_label) — input=50 for all (NVIDIA std).
 _REASONER_SHAPES: list[tuple] = [
-    ("txt", "text in/out (in=512,out=128)", 512, 128, "text", 0, ""),
-    ("vid", "video clip in / short out (in=4096,out=64)", 4096, 64, "video", 16, "256p"),
+    ("txt",  "text",  0, "",      ""),
+    ("img",  "image", 1, "512px", ""),
+    ("vid1", "video", 8, "256p",  " video@1fps"),   # ~1 FPS clip  # VERIFY frame count vs NVIDIA clip
+    ("vid2", "video", 16, "256p", " video@2fps"),   # ~2 FPS clip  # VERIFY frame count vs NVIDIA clip
 ]
 
 
 def _build_reasoner_ops() -> list[OperatingPoint]:
     ops: list[OperatingPoint] = []
-    for key, desc, in_tok, out_tok, modality, frames, res in _REASONER_SHAPES:
-        for conc in REASONER_CONCURRENCIES:
-            ops.append(OperatingPoint(
-                f"{key}-c{conc}", REASONER, f"{desc} @ concurrency {conc}",
-                input_tokens=in_tok, output_tokens=out_tok, concurrency=conc,
-                modality=modality, baseline_latency_ms=0.0,
-                clip_frames=frames, clip_resolution=res,
-                # a fleet at high concurrency shares a common system preamble -> prefix caching acts
-                shared_prefix_tokens=1024 if conc > 1 else 0))
+    for family, modality, frames, res, fps in _REASONER_SHAPES:
+        for out_tok in REASONER_OUTPUTS:
+            for conc in REASONER_CONCURRENCIES:
+                ops.append(OperatingPoint(
+                    f"{family}-o{out_tok}-c{conc}", REASONER,
+                    f"{modality} in=50 out={out_tok}{fps} @ c{conc}",
+                    input_tokens=REASONER_INPUT_TOKENS, output_tokens=out_tok, concurrency=conc,
+                    modality=modality, baseline_latency_ms=0.0,
+                    clip_frames=frames, clip_resolution=res))
     return ops
 
 
@@ -128,9 +145,14 @@ def op_by_name(tower: str, name: str) -> OperatingPoint:
     raise ValueError(f"unknown operating point {name!r} for {tower}")
 
 
-def reasoner_shape_keys() -> list[str]:
-    """Distinct reasoner shapes (e.g. ['txt', 'vid']) — one sweep curve per shape."""
+def reasoner_families() -> list[str]:
+    """Shape families (e.g. ['txt','img','vid1','vid2']) — one curve each on the plot."""
     return [s[0] for s in _REASONER_SHAPES]
+
+
+def reasoner_outputs() -> list[int]:
+    """Output-token lengths swept (NVIDIA: 1 = captioning, 100 = VQA)."""
+    return list(REASONER_OUTPUTS)
 
 
 def batching_ops() -> list[OperatingPoint]:

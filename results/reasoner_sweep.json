@@ -1,80 +1,25 @@
 {
   "experiment": "reasoner_concurrency_sweep",
-  "backend": "vllm",
+  "backend": "mock",
+  "note": "1:1 with NVIDIA/cosmos inference_benchmarks.md: input=50, output {1,100}, concurrency {1,64,128,256}. NVIDIA benchmarks video only; text/image added here.",
   "shapes": [
-    "txt",
-    "vid"
+    "vid1-o100"
   ],
   "concurrencies": [
-    1,
-    64,
-    128,
     256
   ],
   "points": {
-    "txt-c1": {
-      "shape": "txt",
-      "concurrency": 1,
-      "ttft_ms": 21.283,
-      "throughput_tok_s": 178.1,
-      "p50_ms": 716.485,
-      "p95_ms": 717.091
-    },
-    "txt-c64": {
-      "shape": "txt",
-      "concurrency": 64,
-      "ttft_ms": 533.132,
-      "throughput_tok_s": 4260.1,
-      "p50_ms": 1897.843,
-      "p95_ms": 2032.329
-    },
-    "txt-c128": {
-      "shape": "txt",
-      "concurrency": 128,
-      "ttft_ms": 721.613,
-      "throughput_tok_s": 5128.8,
-      "p50_ms": 3166.745,
-      "p95_ms": 3782.599
-    },
-    "txt-c256": {
-      "shape": "txt",
+    "vid1-o100-c256": {
+      "shape": "vid1-o100",
+      "family": "vid1",
+      "output_tokens": 100,
+      "modality": "video",
       "concurrency": 256,
-      "ttft_ms": 834.368,
-      "throughput_tok_s": 5534.6,
-      "p50_ms": 5883.54,
-      "p95_ms": 7914.752
-    },
-    "vid-c1": {
-      "shape": "vid",
-      "concurrency": 1,
-      "ttft_ms": 135.997,
-      "throughput_tok_s": 125.7,
-      "p50_ms": 490.146,
-      "p95_ms": 492.68
-    },
-    "vid-c64": {
-      "shape": "vid",
-      "concurrency": 64,
-      "ttft_ms": 1126.181,
-      "throughput_tok_s": 494.9,
-      "p50_ms": 8008.395,
-      "p95_ms": 12872.647
-    },
-    "vid-c128": {
-      "shape": "vid",
-      "concurrency": 128,
-      "ttft_ms": 956.715,
-      "throughput_tok_s": 498.2,
-      "p50_ms": 15993.551,
-      "p95_ms": 27475.754
-    },
-    "vid-c256": {
-      "shape": "vid",
-      "concurrency": 256,
-      "ttft_ms": 16551.033,
-      "throughput_tok_s": 496.5,
-      "p50_ms": 31647.448,
-      "p95_ms": 40317.504
+      "ttft_ms": 69.3,
+      "throughput_tok_s": 32433.8,
+      "req_throughput_req_s": 324.34,
+      "p50_ms": 789.3,
+      "p95_ms": 907.695
     }
   }
 }

@@ -14,7 +14,7 @@ ablation. So the two towers get two different experiments:
 |---|---|---|
 | **Generator** | per-clip **latency waterfall** (T2I / T2V / I2V × 256p/480p/720p) | CUDA graphs **30–60% on T2I** (§5.3.1); reasoner-cache, Cache-DiT, FP8, VAE-patch, CFG-/Context-Parallel "nearly halves" (§5.3.1/3) |
 | **Generator** | **batching throughput** sweep | **Table 9** (T2V 256p 8–55%, 480p 1–5%, 720p none) |
-| **Reasoner** | stock-vLLM **concurrency/shape sweep** (TTFT + throughput vs concurrency 1/64/128/256) | §5.3.2 methodology (à la `inference_benchmarks.md`) |
+| **Reasoner** | stock-vLLM **concurrency/shape sweep** — TTFT · latency · tok/s · req/s vs concurrency 1/64/128/256 | **1:1 with `inference_benchmarks.md`**: input=50, output {1,100}; video 1/2 FPS reproduced, text+image added |
 
 ## Run it (mock backend — no GPU)
 
@@ -31,9 +31,13 @@ uv sync
 uv run python -m optimize.cli --tower generator --ablate --out-dir results
 #   -> results/generator_waterfall.png, results/generator_batching.png, *.json
 
-# Reasoner: stock-vLLM concurrency/shape sweep (TTFT + throughput):
+# Reasoner: stock-vLLM concurrency/shape sweep, 1:1 with inference_benchmarks.md
+# (input=50, output {1,100}, modalities text/image/video-1fps/video-2fps x concurrency 1/64/128/256):
 uv run python -m optimize.cli --tower reasoner --out-dir results
 #   -> results/reasoner_sweep.png, results/reasoner_sweep.json
+# The full sweep is 32 points; --op is a substring filter to scope a GPU run:
+uv run python -m optimize.cli --tower reasoner --op vid --out-dir results   # video shapes only
+uv run python -m optimize.cli --tower reasoner --op o100 --out-dir results  # output-100 points only
 
 # Measure one hand-picked Generator technique subset (or --preset full):
 uv run python -m optimize.cli --tower generator --enable reasoner-cache,cuda-graphs,fp8,cfg-parallel

@@ -92,35 +92,39 @@ def plot_contribution_waterfall(result: AblationResult, out_path: str | Path,
 
 def plot_reasoner_sweep(result: ReasonerSweepResult, out_path: str | Path,
                         title: str | None = None) -> Path:
-    """TTFT and aggregate throughput vs concurrency, one curve per fixed shape."""
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle(title or f"Cosmos 3 Reasoner — stock vLLM concurrency sweep "
-                          f"(backend={result.backend})", fontsize=14)
+    """Faceted like inference_benchmarks.md: one row per output length, columns
+    {TTFT, throughput}, one curve per modality family. The throughput column shows
+    request/s for the out=1 (captioning) row and token/s for the out=100 (VQA) row."""
+    outputs = result.output_lengths()
+    families = result.families()
+    fig, axes = plt.subplots(len(outputs), 2, figsize=(14, 5 * len(outputs)), squeeze=False)
+    fig.suptitle(title or f"Cosmos 3 Reasoner — stock vLLM concurrency sweep, input=50 "
+                          f"(backend={result.backend})", fontsize=14, y=0.99)
 
-    for ax, metric, ylabel, title_ in (
-        (axes[0], "ttft_ms", "TTFT (ms)", "Time-to-first-token vs concurrency"),
-        (axes[1], "throughput_tok_s", "throughput (tok/s)", "Decode throughput vs concurrency"),
-    ):
-        ax.set_axisbelow(True)
-        ax.grid(color=COLOR_GRID, linewidth=0.8)
-        for si, shape in enumerate(result.shapes):
-            pts = result.curve(shape, metric)
-            if not pts:
-                continue
-            xs, ys = zip(*pts)
-            ax.plot(xs, ys, marker="o", color=_SERIES_COLORS[si % len(_SERIES_COLORS)], label=shape)
-            for xv, yv in pts:
-                ax.annotate(f"{yv:.0f}", (xv, yv), textcoords="offset points",
-                            xytext=(0, 6), ha="center", fontsize=7, color=COLOR_ANNOT)
-        ax.set_xscale("log", base=2)
-        ax.set_xticks(result.concurrencies)
-        ax.set_xticklabels([str(c) for c in result.concurrencies])
-        ax.set_xlabel("concurrency")
-        ax.set_ylabel(ylabel)
-        ax.set_title(title_, fontsize=11)
-        ax.legend(title="shape", fontsize=9)
+    for ri, out in enumerate(outputs):
+        tput_metric, tput_label = (("req_throughput_req_s", "throughput (req/s)") if out == 1
+                                   else ("throughput_tok_s", "throughput (tok/s)"))
+        panels = (("ttft_ms", "TTFT (ms)", f"out={out}: time-to-first-token"),
+                  (tput_metric, tput_label, f"out={out}: {tput_label.split('(')[0].strip()}"))
+        for ci, (metric, ylabel, title_) in enumerate(panels):
+            ax = axes[ri][ci]
+            ax.set_axisbelow(True)
+            ax.grid(color=COLOR_GRID, linewidth=0.8)
+            for fi, fam in enumerate(families):
+                pts = result.curve_fo(fam, out, metric)
+                if not pts:
+                    continue
+                xs, ys = zip(*pts)
+                ax.plot(xs, ys, marker="o", color=_SERIES_COLORS[fi % len(_SERIES_COLORS)], label=fam)
+            ax.set_xscale("log", base=2)
+            ax.set_xticks(result.concurrencies)
+            ax.set_xticklabels([str(c) for c in result.concurrencies])
+            ax.set_xlabel("concurrency")
+            ax.set_ylabel(ylabel)
+            ax.set_title(title_, fontsize=11)
+            ax.legend(title="input", fontsize=8)
 
-    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    plt.tight_layout(rect=(0, 0, 1, 0.97))
     return _save(fig, out_path)
 
 

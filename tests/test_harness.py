@@ -83,13 +83,26 @@ def test_distributed_group_is_mutually_exclusive():
         resolve(GENERATOR, enable=["cfg-parallel", "context-parallel"])
 
 
-# -- Reasoner: concurrency/shape sweep --------------------------------------------
-def test_reasoner_sweep_monotonic_throughput():
+# -- Reasoner: concurrency/shape sweep (1:1 with inference_benchmarks.md) ----------
+def test_reasoner_shapes_match_nvidia():
+    ops = ops_for(REASONER)
+    assert {o.input_tokens for o in ops} == {50}                  # NVIDIA fixed input=50
+    assert {o.output_tokens for o in ops} == {1, 100}            # captioning + VQA
+    assert {o.concurrency for o in ops} == {1, 64, 128, 256}
+    assert {o.modality for o in ops} == {"text", "image", "video"}   # + text/image beyond NVIDIA
+    assert len(ops) == 4 * 2 * 4                                  # 4 families x 2 outputs x 4 concurrencies
+
+
+def test_reasoner_sweep_monotonic():
     res = run_reasoner_sweep(backend="mock")
+    assert res.families() == ["txt", "img", "vid1", "vid2"]
+    assert res.output_lengths() == [1, 100]
     for shape in res.shapes:
         tput = [y for _, y in res.curve(shape, "throughput_tok_s")]
         ttft = [y for _, y in res.curve(shape, "ttft_ms")]
+        reqs = [y for _, y in res.curve(shape, "req_throughput_req_s")]
         assert tput == sorted(tput)        # throughput rises with concurrency
+        assert reqs == sorted(reqs)        # request throughput rises with concurrency
         assert ttft == sorted(ttft)        # TTFT rises (queueing) with concurrency
         assert all(t > 0 for t in ttft)
 

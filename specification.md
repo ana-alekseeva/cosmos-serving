@@ -180,9 +180,16 @@ the 74k-token context admits only B=1.
 
 ### 6c. Reasoner concurrency/shape sweep (Part 1a) — 1× H200
 No technique ladder (§0). Stock vLLM (paged KV-cache, continuous batching, fused
-attention, prefix caching all on by default), swept over **concurrency {1,64,128,256}**
-at fixed shapes (text `in=512,out=128`; video `in=4096,out=64`). Report **TTFT +
-aggregate throughput (tok/s)** per point — the `inference_benchmarks.md` methodology.
+attention, prefix caching all on by default), swept over **concurrency {1,64,128,256}**.
+**1:1 with `inference_benchmarks.md`:** fixed **input=50** tokens, output **1**
+(captioning → request-latency / req-s regime) and **100** (VQA → token-throughput
+regime), BF16 / batch-1, measured with **AIPerf**. Report **TTFT · request latency ·
+tok/s · req/s** per point, faceted by output length. NVIDIA benchmarks only *video*
+(1 & 2 FPS) — those are reproduced exactly; **text** and **image** inputs are added
+for coverage (4 modality families × 2 outputs × 4 concurrencies = 32 points).
+*VERIFY on-box:* NVIDIA does not publish the clip duration/resolution or the AIPerf
+media flags, so the FPS→frame counts and video/image input config are best-effort
+(see `# VERIFY` in `bench/aiperf.py` / `bench/workload.py`).
 
 ---
 
