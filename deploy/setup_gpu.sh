@@ -36,9 +36,9 @@ uv pip install aiperf                                   # NVIDIA/ai-dynamo bench
 #    Generator (2 GPUs): add --omni --tensor-parallel-size 2
 
 echo
-echo "Setup done. Run the REAL ablation (harness manages the server per variant):"
-echo "  uv run python -m optimize.cli --tower reasoner  --ablate --backend vllm --out-dir results"
-echo "  uv run python -m optimize.cli --tower generator --ablate --backend vllm --out-dir results"
+echo "Setup done. Run the REAL experiments (harness manages the server per variant):"
+echo "  uv run python -m optimize.cli --tower generator --ablate --backend vllm --out-dir results  # waterfall + Table 9"
+echo "  uv run python -m optimize.cli --tower reasoner            --backend vllm --out-dir results  # concurrency sweep"
 echo
 echo "First verify flag mappings marked '# VERIFY' in bench/serving.py and bench/aiperf.py"
 echo "against your installed vLLM / vLLM-Omni / AIPerf versions."
