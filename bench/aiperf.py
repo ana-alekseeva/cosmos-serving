@@ -56,6 +56,12 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
         # VERIFY: multimodal (image/video) input needs AIPerf media config or a fixed
         # sample clip; synthetic text tokens alone won't exercise the ViT / EVS path.
         cmd += ["--image-width-mean", "256", "--image-height-mean", "256"]
+    if op.shared_prefix_tokens > 0:
+        # Fleet regime: prepend ONE shared prefix (pool size 1) to every request so prefix caching
+        # has a common prefix to reuse. Without it AIPerf sends unique prompts and APC measures 0%.
+        # VERIFY flag names on-box: `aiperf profile --help | grep -i prefix` — some builds use
+        # --shared-system-prompt-length instead of --num-prefix-prompts/--prefix-prompt-length.
+        cmd += ["--num-prefix-prompts", "1", "--prefix-prompt-length", str(op.shared_prefix_tokens)]
     subprocess.run(cmd, check=True)
     return _parse_aiperf(out_dir)
 

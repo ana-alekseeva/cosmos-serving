@@ -24,6 +24,9 @@ class OperatingPoint:
     baseline_latency_ms: float    # naïve-baseline latency (mock anchor)
     clip_frames: int = 0
     clip_resolution: str = ""
+    shared_prefix_tokens: int = 0  # >0 -> a common system prompt shared across all requests, so
+                                   # prefix caching has a prefix to reuse (fleet regime). 0 = unique
+                                   # prompts per request (APC is a no-op, its natural single-user case).
 
     def label(self) -> str:
         return f"{self.name} — {self.description}"
@@ -38,9 +41,10 @@ REASONER_OPS: list[OperatingPoint] = [
     OperatingPoint("B", REASONER, "short text in / long text out",
                    input_tokens=50, output_tokens=512, concurrency=1,
                    modality="text", baseline_latency_ms=9000.0),
-    OperatingPoint("C", REASONER, "short text · high concurrency",
+    OperatingPoint("C", REASONER, "short text · high concurrency (shared system prompt)",
                    input_tokens=50, output_tokens=100, concurrency=128,
-                   modality="text", baseline_latency_ms=6000.0),
+                   modality="text", baseline_latency_ms=6000.0,
+                   shared_prefix_tokens=1024),   # fleet shares a common preamble -> prefix caching acts
     OperatingPoint("D", REASONER, "video clip in / short text out",
                    input_tokens=4096, output_tokens=48, concurrency=1,
                    modality="video", baseline_latency_ms=4000.0,
@@ -52,7 +56,8 @@ REASONER_OPS: list[OperatingPoint] = [
     OperatingPoint("F", REASONER, "video clip in · high concurrency (fleet)",
                    input_tokens=4096, output_tokens=48, concurrency=128,
                    modality="video", baseline_latency_ms=9000.0,
-                   clip_frames=16, clip_resolution="256p"),
+                   clip_frames=16, clip_resolution="256p",
+                   shared_prefix_tokens=1024),   # fleet shares a text preamble (video stays per-robot)
 ]
 
 # Generator: task x resolution points (Part 1b). Different techniques dominate:
