@@ -65,7 +65,12 @@ def run_aiperf(base_url: str, model: str, op: OperatingPoint,
         duration = max(1, round(op.clip_frames / op.video_fps)) if op.video_fps else REASONER_VIDEO_DURATION_S
         cmd += ["--video-fps", str(int(op.video_fps)), "--video-duration", str(duration),
                 "--video-width", str(w), "--video-height", str(h),
-                "--video-synth-type", "noise"]   # content is semantically irrelevant; only shape matters
+                "--video-synth-type", "noise",   # content is semantically irrelevant; only shape matters
+                # MP4/H.264, NOT the WebM/VP9 default: ffmpeg's synthetic WebM leaves the duration
+                # header unset, so vLLM's frame sampler reads a sentinel and dies in
+                # compute_frames_index_to_sample ("Number of samples ... must be non-negative").
+                # MP4 writes an explicit duration in the moov atom.  # VERIFY vs vLLM video loader.
+                "--video-format", "mp4", "--video-codec", "libx264"]
     subprocess.run(cmd, check=True)
     return _parse_aiperf(out_dir)
 
