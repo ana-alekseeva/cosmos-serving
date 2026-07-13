@@ -23,6 +23,8 @@ uv sync
 uv pip install torch
 uv pip install "vllm==0.24.0"                          # VERIFY the version paired with cosmos3
 uv pip install "vllm-omni==0.24.0"                     # MUST match vllm major.minor
+uv pip install cosmos-guardrail                         # REQUIRED for the Generator: the Cosmos3 safety
+                                                        # checker refuses to boot without it (license guard)
 uv pip install aiperf                                   # NVIDIA/ai-dynamo benchmark client (PyPI)
 
 # 3. Weights access (Cosmos3-Nano is gated — accept the license first):
