@@ -34,6 +34,9 @@ class MockEngine:
     def __init__(self, enabled: list[Technique], **_):
         self.enabled = list(enabled)
 
+    def prepare(self) -> None:
+        pass
+
     def measure(self, op: OperatingPoint, repeats: int = 10, warmup: int = 1) -> Measurement:
         latency = op.baseline_latency_ms
         for t in self.enabled:
@@ -74,6 +77,11 @@ class VLLMEngine:
             model = self.model or DEFAULT_MODEL
             self._server = start_server(model, self.tower, self.enabled, port=self.port)
         return self._server
+
+    def prepare(self) -> None:
+        """Launch the server once, up front, so a launch failure dooms the variant fast —
+        instead of being retried (and re-timing-out) lazily on every OP's measure()."""
+        self._ensure_server()
 
     def measure(self, op: OperatingPoint, repeats: int = 10, warmup: int = 1) -> Measurement:
         server = self._ensure_server()

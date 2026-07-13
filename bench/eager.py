@@ -57,6 +57,11 @@ class EagerEngine:
         self._model = model
         self._proc = AutoProcessor.from_pretrained(self.model_id)
 
+    def prepare(self) -> None:
+        """Load the model once up front so a load failure dooms the variant fast."""
+        if self._model is None:
+            self._load()
+
     def close(self):
         import gc
         self._model = None

@@ -65,7 +65,9 @@ def optimize_cmd(
         def _on_variant(res, v):  # persist partial JSON (summary + full trace) after each variant
             js.write_text(json.dumps(res.to_dict(), indent=2))
             js_full.write_text(json.dumps(res.to_full_dict(), indent=2))
-            cells = "  ".join(f"{o.name}={res.p50[(v.index, o.name)]:.0f}ms" for o in res.ops)
+            cells = "  ".join(
+                f"{o.name}={res.p50[(v.index, o.name)]:.0f}ms" if (v.index, o.name) in res.p50
+                else f"{o.name}=FAIL" for o in res.ops)   # an OP can fail without dropping the variant
             typer.echo(f"[{tower}] variant {v.index + 1}/{len(res.variants)} done — {v.label}: {cells}")
 
         result = run_ablation(tower, backend=backend, ops=ops, model=model, port=port,
@@ -80,9 +82,10 @@ def optimize_cmd(
                 fix = {
                     "eager": "install the missing package on the GPU host (e.g. flash-attn "
                              "for FlashAttention, or the fp8 quant deps) — see bench/eager.py — and re-run",
-                    "vllm": "fix the flag in bench/serving.py::_ENABLE_ARGS and re-run",
+                    "vllm": "check the AIPerf/vLLM log for the failed cell (heavy concurrency OPs can "
+                            "time out AIPerf startup); raise the timeout or the flag, then re-run",
                 }.get(backend, "resolve the error above and re-run")
-                typer.echo(f"\n⚠ {len(result.failed)} variant(s) skipped — {fix}:")
+                typer.echo(f"\n⚠ {len(result.failed)} measurement(s) failed — {fix}:")
                 for label, _ in result.failed:
                     typer.echo(f"  - {label}")
             typer.echo(f"\nwaterfall  -> {png}\nablation   -> {js}\nfull trace -> {js_full}")

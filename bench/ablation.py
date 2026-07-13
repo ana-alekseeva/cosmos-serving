@@ -13,6 +13,16 @@ from bench.workload import OperatingPoint, ops_for
 from optimize.registry import REASONER, Technique, ablation_ladder
 
 
+def _fail_hint(exc: Exception) -> str:
+    """Most-informative single line of an exception's text (error / timeout / unrecognized)."""
+    full = str(exc)
+    keys = ("error", "unrecognized", "timeout")
+    line = next((ln for ln in reversed(full.splitlines())
+                 if any(k in ln.lower() for k in keys)),
+                (full.splitlines() or [repr(exc)])[0])
+    return line.strip()[:300]
+
+
 @dataclass(frozen=True)
 class Variant:
     index: int                       # 0 = baseline, i = after adding ladder[i-1]
@@ -136,29 +146,32 @@ def run_ablation(tower: str, *, backend: str = "mock",
         engine = make_engine(backend, list(v.enabled), tower=tower, model=model, port=port)
         if backend != "mock":       # live progress: the real backends are slow + silent per variant
             print(f"» variant {v.index + 1}/{len(variants)}: {v.label}", flush=True)
+        try:                                        # launch/load once — a failure here dooms the variant
+            engine.prepare()
+        except Exception as exc:
+            engine.close()
+            result.failed.append((v.label, str(exc)[:1500]))
+            print(f"  !! variant {v.index + 1}/{len(variants)} FAILED to launch — {v.label}: "
+                  f"{_fail_hint(exc)}", flush=True)
+            continue
         try:
             for op in ops:
-                m = engine.measure(op, repeats=repeats)
+                # One OP failing (e.g. an AIPerf timeout on the heavy concurrency point) must NOT
+                # discard this variant's other OPs — they share the same server, already measured.
+                try:
+                    m = engine.measure(op, repeats=repeats)
+                except Exception as exc:
+                    result.failed.append((f"{v.label} · OP {op.name}", str(exc)[:1500]))
+                    print(f"    !! OP {op.name} FAILED — {_fail_hint(exc)}", flush=True)
+                    continue
                 result.p50[(v.index, op.name)] = m.p50_ms
                 result.p95[(v.index, op.name)] = m.p95_ms
                 result.samples[(v.index, op.name)] = list(m.samples_ms)
                 if backend != "mock":
                     print(f"    {op.name} = {m.p50_ms:.0f} ms  (p95 {m.p95_ms:.0f})", flush=True)
-        except Exception as exc:
-            for op in ops:                          # drop this variant's partial data
-                result.p50.pop((v.index, op.name), None)
-                result.p95.pop((v.index, op.name), None)
-                result.samples.pop((v.index, op.name), None)
-            full = str(exc)
-            result.failed.append((v.label, full[:1500]))
-            hint = next((ln for ln in reversed(full.splitlines())
-                         if "error" in ln.lower() or "unrecognized" in ln.lower()),
-                        (full.splitlines() or [repr(exc)])[0])
-            print(f"  !! variant {v.index + 1}/{len(variants)} FAILED — {v.label}: {hint.strip()[:300]}")
-            continue                                # finally still closes the engine; on to next variant
         finally:
             engine.close()
-        if on_variant is not None:      # persist + report progress after each variant
+        if on_variant is not None:      # persist after each variant, even if some OPs failed
             on_variant(result, v)
     return result
 
