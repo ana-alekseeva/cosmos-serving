@@ -40,26 +40,22 @@ class Technique:
 # Reasoner ladder (Part 1a) — canonical cumulative order.
 # op names: A (latency), B (decode), C (throughput), D (multimodal / robot).
 # ---------------------------------------------------------------------------
-# The naive vLLM baseline DISABLES each default-on knob (--enforce-eager, SDPA attention,
-# --no-enable-prefix-caching, --no-enable-chunked-prefill, --max-num-seqs 1); each technique
-# re-enables exactly one. See bench/serving.py::build_command. Mock speedups are anchored to
-# the real H200 measurements where we have them (cuda-graphs, fp8).
+# The naive vLLM baseline DISABLES each default-on knob it can (--enforce-eager,
+# --no-enable-prefix-caching, --max-num-seqs 1); each technique re-enables exactly one.
+# See bench/serving.py::build_command. Mock speedups are anchored to the real H200
+# measurements where we have them (cuda-graphs, fp8).
+# NB: two default-on features are NOT rungs on the V1 engine — vLLM can't toggle them off, so
+# they're baked into the stock baseline: (1) FlashAttention (auto-selects FA3; no TORCH_SDPA
+# backend for Cosmos3), (2) chunked prefill (always on in V1; --no-enable-chunked-prefill is
+# ignored). FlashAttention's contribution is attributed in the eager path (bench.fa2_probe).
 REASONER_TECHNIQUES: list[Technique] = [
     Technique("cuda-graphs", "torch.compile + CUDA graphs", REASONER, False, "A",
               {"vllm": {"enforce_eager": False}},
               {"A": 3.35, "B": 3.40, "C": 3.08, "D": 2.51, "E": 3.12, "F": 1.16},
               default_on=True),
-    Technique("flash-attn", "FlashAttention (vs SDPA)", REASONER, False, "B",
-              {"env": {"VLLM_ATTENTION_BACKEND": "FLASH_ATTN"}},
-              {"A": 1.20, "B": 1.60, "C": 1.40, "D": 1.50, "E": 1.40, "F": 1.50},
-              default_on=True),
     Technique("prefix-caching", "prefix caching", REASONER, False, "C",
               {"vllm": {"enable_prefix_caching": True}},
               {"A": 1.02, "B": 1.02, "C": 1.05, "D": 1.02, "E": 1.02, "F": 1.05},
-              default_on=True),
-    Technique("chunked-prefill", "chunked prefill", REASONER, False, "D",
-              {"vllm": {"enable_chunked_prefill": True}},
-              {"A": 1.05, "B": 1.05, "C": 1.10, "D": 1.20, "E": 1.15, "F": 1.20},
               default_on=True),
     Technique("continuous-batching", "continuous batching (max-num-seqs)", REASONER, False, "C",
               {"vllm": {"max_num_seqs": ">1"}},

@@ -134,12 +134,16 @@ def run_ablation(tower: str, *, backend: str = "mock",
         # server config depends on the technique set: one server per variant, reused
         # across ops, then torn down before the next variant relaunches (real backend).
         engine = make_engine(backend, list(v.enabled), tower=tower, model=model, port=port)
+        if backend != "mock":       # live progress: the real backends are slow + silent per variant
+            print(f"» variant {v.index + 1}/{len(variants)}: {v.label}", flush=True)
         try:
             for op in ops:
                 m = engine.measure(op, repeats=repeats)
                 result.p50[(v.index, op.name)] = m.p50_ms
                 result.p95[(v.index, op.name)] = m.p95_ms
                 result.samples[(v.index, op.name)] = list(m.samples_ms)
+                if backend != "mock":
+                    print(f"    {op.name} = {m.p50_ms:.0f} ms  (p95 {m.p95_ms:.0f})", flush=True)
         except Exception as exc:
             for op in ops:                          # drop this variant's partial data
                 result.p50.pop((v.index, op.name), None)

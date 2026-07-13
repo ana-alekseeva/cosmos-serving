@@ -20,6 +20,15 @@ from optimize.registry import GENERATOR, REASONER, Technique
 
 DEFAULT_MODEL = "nvidia/Cosmos3-Nano"
 
+# Reasoner run is pinned so variants are comparable and low-noise (fixed precision, KV budget,
+# GPU memory, seed). Without this, latency drifts run-to-run and the non-FP8 baseline's dtype is
+# left to `auto`. VERIFY on-box: MAX_MODEL_LEN must be >= the largest OP sequence and <= the model's
+# native max_position_embeddings.
+REASONER_DTYPE = "bfloat16"
+MAX_MODEL_LEN = 8192
+GPU_MEM_UTIL = 0.90
+SEED = 0
+
 # Default-OFF techniques: add these server args when the technique is ENABLED.
 _ENABLE_ARGS: dict[str, list[str]] = {
     "fp8":              ["--quantization", "fp8"],
@@ -40,7 +49,7 @@ def build_command(model: str, tower: str, techniques: list[Technique],
 
     vLLM ships most optimizations ON by default, so a *naive* baseline must DISABLE
     them and each technique re-enables exactly one — otherwise "adding" a default-on
-    technique is a no-op. flash-attn is toggled via the VLLM_ATTENTION_BACKEND env var.
+    technique is a no-op.
     """
     keys = {t.key for t in techniques}
     cmd = ["vllm", "serve", model, "--host", "0.0.0.0", "--port", str(port)]
@@ -53,15 +62,25 @@ def build_command(model: str, tower: str, techniques: list[Technique],
         cmd.append("--enforce-eager")
 
     if tower == REASONER:
-        # LLM-serving knobs default ON -> disable in the naive baseline, re-enable per technique.
+        # Pin the run so variants are comparable + low-noise: fixed precision, KV budget, GPU
+        # memory, and seed (spec N1 reproducibility / N2 comparability). Without this, latency
+        # drifts run-to-run and the non-FP8 baseline's dtype is left to `auto`.
+        cmd += [
+            "--dtype", REASONER_DTYPE,
+            "--max-model-len", str(MAX_MODEL_LEN),
+            "--gpu-memory-utilization", str(GPU_MEM_UTIL),
+            "--seed", str(SEED),
+        ]
+        # LLM-serving knobs default ON -> disable the toggleable ones in the naive baseline,
+        # re-enable exactly one per technique.
         if "prefix-caching" not in keys:
-            cmd.append("--no-enable-prefix-caching")       # VERIFY flag name for this vLLM
-        if "chunked-prefill" not in keys:
-            cmd.append("--no-enable-chunked-prefill")      # VERIFY flag name for this vLLM
+            cmd.append("--no-enable-prefix-caching")       # disableable on V1
         if "continuous-batching" not in keys:
             cmd += ["--max-num-seqs", "1"]                 # serialize -> no batching
-        # FlashAttention vs a slow reference backend (SDPA)
-        env["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN" if "flash-attn" in keys else "TORCH_SDPA"
+        # Two default-on features are NOT ablation rungs on the V1 engine — vLLM won't toggle them
+        # off, so they're pinned in the stock baseline: FlashAttention (auto-selects FA3; no
+        # TORCH_SDPA backend for Cosmos3) and chunked prefill (always on; --no-enable-chunked-prefill
+        # is ignored). FlashAttention's contribution is attributed in the eager path (bench.fa2_probe).
 
     for k in sorted(keys):
         cmd += _ENABLE_ARGS.get(k, [])
@@ -100,12 +119,18 @@ def start_server(model: str, tower: str, techniques: list[Technique],
     proc = subprocess.Popen(cmd, env={**os.environ, **env},
                             stdout=log, stderr=subprocess.STDOUT)  # captured, tailed on failure
     handle = ServerHandle(proc, f"http://127.0.0.1:{port}", log_path)
+    # vLLM startup is silent for 1-2 min (load + compile + memory profiling); announce it
+    # so a slow-but-healthy launch doesn't read as a hang. `tail -f` the log for detail.
+    print(f"    launching vLLM — waiting for /health (up to {ready_timeout // 60} min); "
+          f"log: {log_path}", flush=True)
+    t0 = time.time()
     try:
         _wait_healthy(handle.base_url, proc, ready_timeout)
     except RuntimeError as exc:
         raise RuntimeError(
             f"{exc}\n  cmd: {' '.join(cmd)}\n  --- vllm log tail ({log_path}) ---\n{_tail(log_path)}"
         ) from None
+    print(f"    ✓ vLLM healthy in {time.time() - t0:.0f}s", flush=True)
     return handle
 
 
