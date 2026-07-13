@@ -1,0 +1,204 @@
+{
+  "tower": "generator",
+  "backend": "vllm",
+  "repeats": 10,
+  "ops": [
+    "t2i-1024",
+    "t2v-256",
+    "t2v-480",
+    "i2v-480"
+  ],
+  "variants": [
+    "G0 baseline",
+    "+ reasoner-tower output caching",
+    "+ torch.compile / CUDA graphs",
+    "+ Cache-DiT",
+    "+ FP8 quantization",
+    "+ VAE-Patch-Parallel",
+    "+ CFG-Parallel (2 GPU)"
+  ],
+  "results": {
+    "t2i-1024": [
+      {
+        "variant": "G0 baseline",
+        "p50_ms": 2226.041,
+        "p95_ms": 2234.457,
+        "n": 5,
+        "samples_ms": [
+          2234.457,
+          2230.99,
+          2220.191,
+          2226.041,
+          2220.157
+        ]
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "p50_ms": 2209.671,
+        "p95_ms": 2212.606,
+        "n": 5,
+        "samples_ms": [
+          2212.038,
+          2212.606,
+          2209.671,
+          2199.619,
+          2202.405
+        ]
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "p50_ms": 1833.165,
+        "p95_ms": 1839.79,
+        "n": 5,
+        "samples_ms": [
+          1833.165,
+          1828.946,
+          1839.79,
+          1826.808,
+          1837.066
+        ]
+      }
+    ],
+    "t2v-256": [
+      {
+        "variant": "G0 baseline",
+        "p50_ms": 6429.092,
+        "p95_ms": 6455.724,
+        "n": 5,
+        "samples_ms": [
+          6397.985,
+          6418.95,
+          6429.092,
+          6430.432,
+          6455.724
+        ]
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "p50_ms": 6424.509,
+        "p95_ms": 6430.181,
+        "n": 5,
+        "samples_ms": [
+          6378.921,
+          6424.509,
+          6411.114,
+          6425.963,
+          6430.181
+        ]
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "p50_ms": 5695.897,
+        "p95_ms": 5704.73,
+        "n": 5,
+        "samples_ms": [
+          5642.337,
+          5695.897,
+          5685.112,
+          5703.308,
+          5704.73
+        ]
+      }
+    ],
+    "t2v-480": [
+      {
+        "variant": "G0 baseline",
+        "p50_ms": 39579.195,
+        "p95_ms": 39756.236,
+        "n": 5,
+        "samples_ms": [
+          39501.327,
+          39535.866,
+          39588.074,
+          39756.236,
+          39579.195
+        ]
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "p50_ms": 39598.917,
+        "p95_ms": 39634.157,
+        "n": 5,
+        "samples_ms": [
+          39625.099,
+          39634.157,
+          39568.314,
+          39439.806,
+          39598.917
+        ]
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "p50_ms": 35906.287,
+        "p95_ms": 36019.08,
+        "n": 5,
+        "samples_ms": [
+          35750.036,
+          35806.931,
+          35939.275,
+          36019.08,
+          35906.287
+        ]
+      }
+    ],
+    "i2v-480": [
+      {
+        "variant": "G0 baseline",
+        "p50_ms": 39539.539,
+        "p95_ms": 39586.571,
+        "n": 5,
+        "samples_ms": [
+          39528.368,
+          39525.049,
+          39579.03,
+          39586.571,
+          39539.539
+        ]
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "p50_ms": 39563.8,
+        "p95_ms": 39625.749,
+        "n": 5,
+        "samples_ms": [
+          39454.456,
+          39575.579,
+          39563.8,
+          39348.805,
+          39625.749
+        ]
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "p50_ms": 35928.072,
+        "p95_ms": 35980.09,
+        "n": 5,
+        "samples_ms": [
+          35783.775,
+          35823.749,
+          35952.005,
+          35928.072,
+          35980.09
+        ]
+      }
+    ]
+  },
+  "failed": [
+    [
+      "+ Cache-DiT",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit\n  --- vllm log tail (/tmp/vllm-serve-gft4440z.log) ---\nINFO 07-13 14:52:42 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:52:44 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm [-h] [-v] {serve,bench} ...\nvllm: error: unrecognized arguments: --cache-dit\n"
+    ],
+    [
+      "+ FP8 quantization",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit --quantization fp8\n  --- vllm log tail (/tmp/vllm-serve-33786bm6.log) ---\nINFO 07-13 14:52:54 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:52:56 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm [-h] [-v] {serve,bench} ...\nvllm: error: unrecognized arguments: --cache-dit\n"
+    ],
+    [
+      "+ VAE-Patch-Parallel",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit --quantization fp8 --vae-patch-parallel\n  --- vllm log tail (/tmp/vllm-serve-28uolccv.log) ---\nINFO 07-13 14:53:06 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:53:08 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm serve [model_tag] --omni [options]\nvllm serve: error: argument --vae-patch-parallel-size: expected one argument\n"
+    ],
+    [
+      "+ CFG-Parallel (2 GPU)",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit --cfg-parallel --quantization fp8 --vae-patch-parallel --tensor-parallel-size 2\n  --- vllm log tail (/tmp/vllm-serve-v3r96ayt.log) ---\nINFO 07-13 14:53:18 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:53:20 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm serve [model_tag] --omni [options]\nvllm serve: error: argument --cfg-parallel-size: expected one argument\n"
+    ]
+  ]
+}

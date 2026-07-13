@@ -1,0 +1,143 @@
+{
+  "tower": "generator",
+  "backend": "vllm",
+  "ops": [
+    "t2i-1024",
+    "t2v-256",
+    "t2v-480",
+    "i2v-480"
+  ],
+  "variants": [
+    "G0 baseline",
+    "+ reasoner-tower output caching",
+    "+ torch.compile / CUDA graphs",
+    "+ Cache-DiT",
+    "+ FP8 quantization",
+    "+ VAE-Patch-Parallel",
+    "+ CFG-Parallel (2 GPU)"
+  ],
+  "results": {
+    "t2i-1024": [
+      {
+        "variant": "G0 baseline",
+        "ms": 2226.0,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 2209.7,
+        "vs_v0": 1.01,
+        "vs_prev": 1.01,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 1833.2,
+        "vs_v0": 1.21,
+        "vs_prev": 1.21,
+        "lossy": false,
+        "scaling": false
+      }
+    ],
+    "t2v-256": [
+      {
+        "variant": "G0 baseline",
+        "ms": 6429.1,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 6424.5,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 5695.9,
+        "vs_v0": 1.13,
+        "vs_prev": 1.13,
+        "lossy": false,
+        "scaling": false
+      }
+    ],
+    "t2v-480": [
+      {
+        "variant": "G0 baseline",
+        "ms": 39579.2,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 39598.9,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 35906.3,
+        "vs_v0": 1.1,
+        "vs_prev": 1.1,
+        "lossy": false,
+        "scaling": false
+      }
+    ],
+    "i2v-480": [
+      {
+        "variant": "G0 baseline",
+        "ms": 39539.5,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ reasoner-tower output caching",
+        "ms": 39563.8,
+        "vs_v0": 1.0,
+        "vs_prev": 1.0,
+        "lossy": false,
+        "scaling": false
+      },
+      {
+        "variant": "+ torch.compile / CUDA graphs",
+        "ms": 35928.1,
+        "vs_v0": 1.1,
+        "vs_prev": 1.1,
+        "lossy": false,
+        "scaling": false
+      }
+    ]
+  },
+  "failed": [
+    [
+      "+ Cache-DiT",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit\n  --- vllm log tail (/tmp/vllm-serve-gft4440z.log) ---\nINFO 07-13 14:52:42 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:52:44 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm [-h] [-v] {serve,bench} ...\nvllm: error: unrecognized arguments: --cache-dit\n"
+    ],
+    [
+      "+ FP8 quantization",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit --quantization fp8\n  --- vllm log tail (/tmp/vllm-serve-33786bm6.log) ---\nINFO 07-13 14:52:54 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:52:56 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm [-h] [-v] {serve,bench} ...\nvllm: error: unrecognized arguments: --cache-dit\n"
+    ],
+    [
+      "+ VAE-Patch-Parallel",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit --quantization fp8 --vae-patch-parallel\n  --- vllm log tail (/tmp/vllm-serve-28uolccv.log) ---\nINFO 07-13 14:53:06 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:53:08 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm serve [model_tag] --omni [options]\nvllm serve: error: argument --vae-patch-parallel-size: expected one argument\n"
+    ],
+    [
+      "+ CFG-Parallel (2 GPU)",
+      "server exited early (exit code 2)\n  cmd: vllm serve nvidia/Cosmos3-Nano --host 0.0.0.0 --port 8000 --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 --seed 0 --omni --cache-dit --cfg-parallel --quantization fp8 --vae-patch-parallel --tensor-parallel-size 2\n  --- vllm log tail (/tmp/vllm-serve-v3r96ayt.log) ---\nINFO 07-13 14:53:18 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.\nINFO 07-13 14:53:20 [main.py:54] Delegating entrypoint handling to vllm-omni\nusage: vllm serve [model_tag] --omni [options]\nvllm serve: error: argument --cfg-parallel-size: expected one argument\n"
+    ]
+  ]
+}
