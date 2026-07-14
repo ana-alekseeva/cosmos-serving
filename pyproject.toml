@@ -1,18 +1,25 @@
 [project]
 name = "cosmos-serving"
-version = "0.1.0"
-description = "Reproduce + attribute NVIDIA Cosmos 3 serving optimizations on Nebius, then improve latency."
+version = "0.2.0"
+description = "Cosmos3-Nano-Policy-DROID serving: per-stage latency attribution + optimization waterfalls (PyTorch ablation + vLLM/vLLM-Omni production), RoboLab-gated."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "matplotlib>=3.8",
     "typer>=0.12",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+# Aggregation extras (Job 5): Parquet summaries need pandas + pyarrow. CSV/JSON always work
+# without them; the aggregator degrades gracefully (writes CSV, skips Parquet) when absent.
+aggregate = [
+    "pandas>=2.0",
+    "pyarrow>=15.0",
+]
 # GPU / real backend — installed on the H200, not locally (see deploy/setup_gpu.sh).
-# torch, vllm, vllm-omni, aiperf are environment-specific; install on-box, not via this extra.
+# torch, vllm, vllm-omni are environment-specific; install on-box, not via this extra.
 gpu = [
     "mlflow>=2.14",
 ]
@@ -23,7 +30,7 @@ dev = [
 ]
 
 [tool.uv]
-# Flat app layout (bench/ + optimize/ importable via cwd); don't build/install the project itself.
+# Flat app layout (policy/ package + top-level run_*.py importable via cwd); don't build/install.
 package = false
 
 [tool.pytest.ini_options]

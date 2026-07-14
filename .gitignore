@@ -3,3 +3,19 @@ __pycache__/
 *.pyc
 .DS_Store
 .pytest_cache/
+
+# Per-configuration subprocess outputs are bulky + regenerable (run_matrix.py). Keep the
+# aggregated figures/JSON (results/aggregate/), the archived old-framing results, and E6 as
+# one example of the §7 per-config log format.
+results/*/
+!results/aggregate/
+!results/_archive_old_framing/
+!results/E6/
+# throwaway sibling output dirs (smoke runs, production validation)
+results-smoke/
+results-production/
+# project-local editable checkout of the Nebius workbench (deploy/install_npa.sh)
+.nebius-physical-ai/
+# real DROID captures (policy/capture.py): bulky image tensors, regenerable from droid_100.
+# The committed mock fixture (policy/mock/manifest.json) is the only in-repo replay set.
+data/replay_real/

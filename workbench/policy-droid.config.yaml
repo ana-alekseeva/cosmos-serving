@@ -1,0 +1,38 @@
+# Serve nvidia/Cosmos3-Nano-Policy-DROID as a Nebius serverless endpoint, with the
+# ablation-winning latency optimizations baked into the serving engine.
+#
+# INFRA PROVISIONING ONLY. This config tells the workbench (npa) what endpoint to stand up and
+# which engine flags to bake in. The ablation that PICKS those flags (run_matrix.py + aggregate.py)
+# and the RoboLab task-success gate that guards them (run_robolab.py / jobs/job3-robolab-subset)
+# both live in the repository, not in this config.
+#
+# The only evaluated task (§1): DROID camera observations + language instruction + proprioceptive
+# state -> 32x8 robot-action chunk. Reasoner served by vLLM (Qwen3-VL path); Generator / full
+# policy by vLLM-Omni.
+
+serve:
+  model: nvidia/Cosmos3-Nano-Policy-DROID   # https://huggingface.co/nvidia/Cosmos3-Nano-Policy-DROID
+  runtime: serverless                        # managed Nebius AI endpoint (npa provisions infra)
+  gpu_type: gpu-h200-sxm                     # VERIFY: nebius compute platform list
+  gpu_preset: 1gpu-h200                      # 1 GPU (single-GPU final E6); 2gpu-h200 to add CFG-Parallel
+  project: serverless-challenge
+  name: cosmos-policy
+  # The final end-to-end optimized configuration (E6): torch.compile + CUDA graphs +
+  # reasoner-conditioning-cache + Cache-DiT + FP8. On a >=2-GPU preset, add CFG-Parallel (§3,
+  # Job 1b) — a scaling win, not a per-GPU algorithmic one. Baked in as vLLM-Omni serve args
+  # (policy/serving.py::engine_args); jobs/deploy-optimized.sh applies them.
+  configuration: E6
+  engine_args:
+    - --policy-conditioning-cache true       # reasoner conditioning cache (R4/E4)
+    - --cache-backend cache_dit              # Cache-DiT (lossy — gated by RoboLab subset)
+    - --quantization fp8                     # dynamic FP8 (lossy — gated by RoboLab subset)
+
+# Quality guard for this endpoint (RoboLab subset task success, baseline vs optimized) runs as a
+# separate infra job — jobs/job3-robolab-subset.sky.yaml — pointed at this endpoint's URL.
+
+outputs:
+  uri: s3://serverless-challenge/cosmos3-ablation-results/policy-droid/
+  endpoint: https://storage.eu-north1.nebius.cloud
+
+secrets:
+  hf_token_env: HF_TOKEN                      # Cosmos3-Nano-Policy-DROID license accepted on HF

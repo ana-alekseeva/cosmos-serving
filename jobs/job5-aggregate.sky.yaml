@@ -1,0 +1,49 @@
+# Job 5 — aggregation (specification_revised.txt §4).
+#
+# INFRA PROVISIONING ONLY. A small CPU job that merges the per-configuration logs from Job 1
+# (pulled from object storage) and generates the CSV/Parquet summaries, waterfall data,
+# confidence intervals, figures, and quality-comparison tables. No GPU.
+#
+# Job 1 already runs aggregate.py inline; this standalone CPU job is for RE-aggregating (e.g.
+# after merging production + RoboLab results, or regenerating figures) without holding a GPU.
+#
+#   sky jobs launch jobs/job5-aggregate.sky.yaml \
+#     --env INPUT_URI=s3://serverless-challenge/cosmos3-ablation-results/raw/ \
+#     --env OUTPUT_URI=s3://serverless-challenge/cosmos3-ablation-results/aggregate/
+
+name: cosmos-policy-aggregate
+
+resources:
+  cloud: kubernetes
+  cpus: 8+
+  memory: 32+                       # CPU-only aggregation job (§4 Job 5)
+
+num_nodes: 1
+
+envs:
+  REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY
+  REPO_REF: "main"
+  INPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/raw/"     # per-config subprocess dirs
+  OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/aggregate/"
+  AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
+
+setup: |
+  set -euo pipefail
+  command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  rm -rf cosmos-serving && git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" cosmos-serving
+  cd cosmos-serving && uv sync --extra aggregate     # pandas + pyarrow for Parquet summaries
+
+run: |
+  set -euo pipefail
+  export PATH="$HOME/.local/bin:$PATH"
+  cd cosmos-serving
+  mkdir -p results
+  if command -v aws >/dev/null 2>&1; then
+    aws s3 cp "${INPUT_URI}" results/ --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+  fi
+  uv run python aggregate.py --out-dir results
+  if command -v aws >/dev/null 2>&1; then
+    aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+    echo "aggregate -> ${OUTPUT_URI}"
+  fi

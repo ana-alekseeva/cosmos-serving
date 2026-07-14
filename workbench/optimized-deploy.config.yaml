@@ -1,0 +1,29 @@
+# Deploy Cosmos3-Nano-Policy-DROID as a Nebius serverless endpoint with the ablation-winning
+# latency optimizations baked in. INFRA PROVISIONING ONLY — the ablation that identifies which
+# techniques win lives in the repo (policy/, run_matrix.py, aggregate.py). Read
+# results/aggregate/waterfall_end_to_end.json and results/aggregate/quality_comparison.json
+# (the lossy gate) before trusting `configuration`.
+
+deploy:
+  runtime: serverless              # managed Nebius AI endpoint — npa provisions the infra
+  model: nvidia/Cosmos3-Nano-Policy-DROID
+  gpu_type: gpu-h200-sxm           # VERIFY: `nebius compute platform list`
+  gpu_preset: 1gpu-h200            # single-GPU final (E6); 2gpu-h200 to keep CFG-Parallel (Job 1b)
+  project: serverless-challenge
+  name: cosmos-policy
+  # The final end-to-end configuration (E6). jobs/deploy-optimized.sh maps these to the
+  # vLLM-Omni serve args the deploy passes through (--extra-serve-args).
+  configuration: E6
+  engine_args:
+    - --policy-conditioning-cache true       # reasoner conditioning cache (R4/E4)
+    - --cache-backend cache_dit              # Cache-DiT (lossy)
+    - --quantization fp8                     # dynamic FP8 (lossy)
+
+test:
+  # A DROID action-chunk request (not a text/image prompt): instruction + observation refs.
+  request:
+    instruction: "pick up the red cube and place it in the bowl"
+  infer_uri: s3://serverless-challenge/cosmos3-ablation-results/policy-droid/infer/
+
+secrets:
+  hf_token_env: HF_TOKEN

@@ -1,106 +1,134 @@
-# cosmos-serving
+# cosmos-serving — Cosmos3-Nano-Policy-DROID latency attribution & optimization
 
-Reproduce and attribute NVIDIA's **Cosmos 3 serving optimizations** (tech report
-§5.3), and show how each technique moves **latency** and **throughput** across
-different input/output shapes. See [specification.md](specification.md) for the plan.
+Attribute and reduce the inference latency of **`Cosmos3-Nano-Policy-DROID`** on the *only*
+evaluated task ([specification_revised.txt](specification_revised.txt) §1):
 
-## What the report actually quantifies (and what this repo measures)
+```text
+DROID camera observations + language instruction + proprioceptive state
+    → 32 × 8 robot-action chunk
+```
 
-§5.3 puts the numbers on the **Generator** (diffusion). The **Reasoner** is "reuse
-Qwen3-VL in vLLM / TensorRT-LLM out of the box" — the report gives it *no* technique
-ablation. So the two towers get two different experiments:
+The model is evaluated by executing its generated actions in **RoboLab**. This repo runs the
+single-GPU PyTorch ablation matrix, attributes each optimization to the pipeline stage it
+shrinks, validates the winner through the production vLLM / vLLM-Omni engines, and gates the
+lossy techniques on RoboLab task success.
 
-| Tower | Experiment | Reproduces |
+## Three waterfalls (specification_revised.txt §3)
+
+| Waterfall | Rungs | Measures |
 |---|---|---|
-| **Generator** | per-clip **latency waterfall** (T2I / T2V / I2V × 256p/480p/720p) | CUDA graphs **30–60% on T2I** (§5.3.1); reasoner-cache, Cache-DiT, FP8, VAE-patch, CFG-/Context-Parallel "nearly halves" (§5.3.1/3) |
-| **Generator** | **batching throughput** sweep | **Table 9** (T2V 256p 8–55%, 480p 1–5%, 720p none) |
-| **Reasoner** | stock-vLLM **concurrency/shape sweep** — TTFT · latency · tok/s · req/s vs concurrency 1/64/128/256 | **1:1 with `inference_benchmarks.md`**: input=50, output {1,100}; video 1/2 FPS reproduced, text+image added |
+| **Reasoner conditioning** | R0 eager → +Flash → +`torch.compile` → +CUDA graphs → **+conditioning cache** | `reasoner_ms` |
+| **Generator** | G0 eager → +Flash → +compile → +CUDA graphs → **+Cache-DiT** → **+FP8** | `generator_prepare_ms` + `denoising_ms` |
+| **End-to-end** | E0 eager → Flash → compile → CUDA graphs → reasoner cache → Cache-DiT → FP8 → **final** | `total_chunk_ms` |
+
+Cache-DiT and FP8 are **lossy → quality-gated**: included in the final configuration only if
+RoboLab success holds (§3, §9). The multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel)
+run as a **separate** experiment (§3) — never mixed into the single-GPU waterfall.
 
 ## Run it (mock backend — no GPU)
 
-The harness runs end-to-end on the **mock backend** (a modeled-latency table anchored
-to the report's stated numbers) so the plumbing and figures are validated before the
-H200. Swap `--backend mock` → `--backend vllm` on the GPU.
+The harness runs end-to-end on the **mock backend** (a modeled per-stage latency table anchored
+to the spec's §7 example log) so the plumbing, per-request JSONL logs, waterfalls, stage
+breakdown, and aggregation are validated before the GPU. Swap `--backend mock` → `--backend vllm`
+on the target inference GPU.
 
 Managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
 
-# Generator: latency waterfall + Table 9 batching throughput (+ JSON):
-uv run python -m optimize.cli --tower generator --ablate --out-dir results
-#   -> results/generator_waterfall.png, results/generator_batching.png, *.json
+# Job 1 — the full single-GPU ablation matrix (R0-R4, G0-G5, E0-E6) with §8 bias controls
+# (baseline at start+end, randomized order, drift rejection), each config an isolated subprocess:
+uv run python run_matrix.py --config config/experiment.yaml \
+    --input-manifest policy/mock/manifest.json --output-dir results --backend mock
 
-# Reasoner: stock-vLLM concurrency/shape sweep, 1:1 with inference_benchmarks.md
-# (input=50, output {1,100}, modalities text/image/video-1fps/video-2fps x concurrency 1/64/128/256):
-uv run python -m optimize.cli --tower reasoner --out-dir results
-#   -> results/reasoner_sweep.png, results/reasoner_sweep.json
-# The full sweep is 32 points; --op is a substring filter to scope a GPU run:
-uv run python -m optimize.cli --tower reasoner --op vid --out-dir results   # video shapes only
-uv run python -m optimize.cli --tower reasoner --op o100 --out-dir results  # output-100 points only
+# Job 5 — aggregate: waterfalls + stage breakdown + CIs + CSV/Parquet + quality tables + figures:
+uv run python aggregate.py --out-dir results
+#   -> results/aggregate/waterfall_{reasoner,generator,end_to_end}.png
+#      results/aggregate/stage_breakdown.png, quality_comparison.png, summary.csv
 
-# Measure one hand-picked Generator technique subset (or --preset full):
-uv run python -m optimize.cli --tower generator --enable reasoner-cache,cuda-graphs,fp8,cfg-parallel
+# One configuration on its own (the §7 per-config artifacts):
+uv run python run_configuration.py --configuration G3 --backend mock --out-dir results
+
+# RoboLab subset quality gate (baseline vs final) — the lossy Cache-DiT/FP8 gate:
+uv run python run_robolab.py --baseline E0 --candidate E6
+
+# Separate multi-GPU experiment (CFG-Parallel + Ulysses vs best single-GPU):
+uv run python run_multigpu.py --backend mock
 ```
+
+Example end-to-end result (mock, 4-step DROID recipe): **E0 ≈ 229 ms → E6 ≈ 57 ms (4.0×)**,
+dominated by the reasoner-conditioning cache (the naive baseline recomputes conditioning every
+one of the 4 denoising steps: reasoner R0 183 ms → R4 28 ms); Cache-DiT + FP8 pass the RoboLab
+subset gate. See `results/aggregate/`.
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `optimize/registry.py` | Generator technique toggles, presets, latency-ladder order, mock model |
-| `optimize/cli.py` | `optimize` command — generator `--ablate` / subset; reasoner sweep |
-| `optimize/techniques/` | real-backend wiring, one module per toggle (stubs) |
-| `bench/workload.py` | Generator OP matrix + reasoner concurrency-sweep OPs + Table 9 |
-| `bench/ablation.py` | cumulative `--ablate` runner + "vs V0 / vs prev" table (Generator) |
-| `bench/sweep.py` | reasoner concurrency sweep + generator batching-throughput sweep |
-| `bench/drivers.py` | MockEngine (runs anywhere) + VLLMEngine (H200) |
-| `bench/serving.py` | vLLM / vLLM-Omni server launch + flag mapping |
-| `bench/aiperf.py` | AIPerf (reasoner TTFT/throughput) + timed generation (generator) |
-| `bench/plots.py` | waterfall + reasoner-sweep + batching-throughput figures |
+| `run_matrix.py` | Job 1 — ablation-matrix orchestrator (subprocess per config, §8 bias controls) |
+| `run_configuration.py` | single configuration → the five §7 log artifacts |
+| `aggregate.py` | Job 5 — merge logs → CSV/Parquet + waterfalls + stage breakdown + CIs + figures |
+| `run_robolab.py` / `run_multigpu.py` | Jobs 3-4 quality gate / the separate multi-GPU experiment |
+| `config/experiment.yaml` | the experiment config (§4 `--config experiment.yaml`) |
+| `policy/configs.py` | the R0-R4 / G0-G5 / E0-E6 configuration matrix + stage-effect model |
+| `policy/dataset.py` | fixed ~256-request replay set + the 18-task RoboLab quality subset (§5) |
+| `policy/pipeline.py` | mock per-stage latency engine + vLLM/vLLM-Omni real-backend stub |
+| `policy/measure.py` / `logs.py` | the §6 latency field set, p50/p90/p99, §7 log format |
+| `policy/matrix.py` / `runner.py` | matrix orchestration core / single-config runner core |
+| `policy/aggregate.py` / `plots.py` | aggregation + the waterfall / stage-breakdown / quality figures |
+| `policy/serving.py` | real-backend engine-flag mapping + the §9 forced-SDPA / static-shape rules |
+| `policy/robolab.py` / `multigpu.py` | RoboLab task-success gate / CFG-/Ulysses-parallel experiment |
+| `jobs/` | the five-job Nebius plan (§4) + optimized-endpoint deploy |
+| `workbench/` | Nebius infra-provisioning configs (serve the optimized policy endpoint) |
+| `results/` | waterfalls, stage breakdown, quality tables, CSV, one example per-config log dir |
 
-Real H200 numbers from the previous (abandoned) reasoner-ablation framing are kept
-under `results/_archive_old_framing/` for reference.
+## Latency measurement (specification_revised.txt §6)
 
-## Real backend (on the H200)
+Every request records the full field set — `preprocess_ms h2d_ms reasoner_ms
+generator_prepare_ms denoising_ms denoising_step_ms[] postprocess_ms d2h_ms server_ms
+transport_ms first_action_ms total_chunk_ms peak_memory_mb` — with CUDA events for GPU stages
+and monotonic timers end-to-end, batch size 1, ~25 warm-ups (excluded), ≥200 measured requests,
+and p50/p90/p99 summaries. One JSONL row per request (§7) plus `summary.json`,
+`environment.json`, `system-info.json`, `status.json` per configuration.
 
-`--backend vllm` launches a vLLM (Reasoner) / vLLM-Omni (Generator) server, measures
-each point via **AIPerf** (reasoner: TTFT + throughput at each concurrency) or a timed
-generation request (generator), then tears the server down.
+## Real backend (on the GPU)
 
-```bash
-bash deploy/setup_gpu.sh          # deps + weights access (one-time)
-uv run python -m optimize.cli --tower generator --ablate --backend vllm --out-dir results
-uv run python -m optimize.cli --tower reasoner --backend vllm --out-dir results
-```
-
-**Before trusting the numbers**, confirm every `# VERIFY` marker in `bench/serving.py`
-and `bench/aiperf.py` against your installed vLLM / vLLM-Omni / AIPerf versions (CLI
-flag names, generation endpoint/payload, AIPerf JSON schema, multimodal input). These
-were written from docs, not run on a GPU. Architectural vLLM features (paged attention,
-continuous batching, fused attention) are always-on — the reasoner sweep characterizes
-them as the stock config, it does not toggle them.
-
-## Deploy Cosmos on Nebius with the workbench (`npa`)
-
-An alternative to `deploy/setup_gpu.sh`: use Nebius's
-[`nebius-physical-ai`](https://github.com/nebius/nebius-physical-ai) workbench to stand
-up a managed Cosmos serving endpoint. This is the fastest way to *run* Cosmos; it is
-**separate** from the ablation harness above, which manages its own per-variant servers
-for measurement.
+`--backend vllm` launches vLLM (Reasoner) / vLLM-Omni (Generator / full policy) with each
+configuration's engine flags and measures wall-clock from the server's per-stage timers.
 
 ```bash
-uv tool install "git+https://github.com/nebius/nebius-physical-ai.git#subdirectory=npa"
-npa configure --interactive      # Nebius profile: tenant/project/region/bucket
-export HF_TOKEN=hf_...            # gated Cosmos weights (accept the license on HF first)
-
-npa workbench cosmos -p <project-alias> -n cosmos deploy \
-  --runtime serverless --gpu-type gpu-h200-sxm --gpu-preset <preset> --wait
-npa workbench cosmos -p <project-alias> -n cosmos serve         # deploy leaves it UNLOADED
-npa workbench cosmos -p <project-alias> -n cosmos infer \
-  --prompt "A robot arm stacks colored cubes on a table" \
-  --output-path s3://<your-bucket>/cosmos/out/ --output-format json
-npa workbench cosmos -p <project-alias> -n cosmos teardown --yes   # stop billing
+bash deploy/setup_gpu.sh          # deps + weights access + stage the replay set (one-time)
+uv run python run_matrix.py --input-manifest /local/replay/manifest.json \
+    --output-dir results --backend vllm
+uv run python aggregate.py --out-dir results
 ```
 
-Note: the workbench's own `npa … cosmos optimize` is a roadmap placeholder (`not yet
-implemented`) — the optimization work in this repo is what fills that slot.
+**Before trusting the numbers**, confirm every `# VERIFY` in `policy/serving.py` against your
+installed vLLM / vLLM-Omni (engine flag names, the forced-SDPA Flash backend that must *fail*
+rather than silently fall back, static/bucketed shapes for the CUDA-graph configs, and the
+per-stage timing response). The mock stands in for all of this offline.
+
+## Create Nebius resources with the workbench (`npa`)
+
+Provision on Nebius with the **Nebius Physical AI workbench** (`npa`), installed into this
+project's venv. Commands below are the real, current CLI (npa 0.1.0), verified on-box.
+
+```bash
+# One-time: install npa editable into this project, then configure (needs the "AI Jobs" IAM role)
+bash deploy/install_npa.sh
+npa configure --interactive
+
+# Create a serverless AI endpoint for the optimized (E6) DROID policy — the workbench resource:
+MODE=optimized PROJECT_ALIAS=cosmos HF_TOKEN=$HF_TOKEN bash jobs/deploy-optimized.sh
+#   -> npa workbench cosmos deploy --runtime serverless --model nvidia/Cosmos3-Nano-Policy-DROID
+#      --gpu-type gpu-h200-sxm --gpu-preset 1gpu-16vcpu-200gb --env ... --auth token --wait
+
+# Measure / gate the deployed endpoint with the repo harness:
+python run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E6
+```
+
+Full runbook (baseline vs optimized, RoboLab gate, teardown, and the verified-flags reference)
+in [jobs/README.md](jobs/README.md). The ablation/eval logic stays **in this repo**; the
+workbench only provisions the infra — its own `npa … cosmos optimize` is a `Roadmap placeholder`,
+which we don't depend on.

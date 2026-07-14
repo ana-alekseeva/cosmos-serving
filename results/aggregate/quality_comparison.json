@@ -1,0 +1,45 @@
+{
+  "note": "Cache-DiT + FP8 are lossy; the RoboLab subset (\u00a75) makes the real accept/reject call. `action_drift` is the offline action-difference proxy.",
+  "rows": [
+    {
+      "waterfall": "generator",
+      "cid": "G4",
+      "label": "+ Cache-DiT",
+      "quality_gate": "passed",
+      "action_drift": 0.006,
+      "baseline_p50_chunk_ms": 90.874,
+      "p50_chunk_ms": 77.121,
+      "speedup_vs_baseline": 1.178
+    },
+    {
+      "waterfall": "generator",
+      "cid": "G5",
+      "label": "+ Dynamic FP8 quantization",
+      "quality_gate": "passed",
+      "action_drift": 0.011,
+      "baseline_p50_chunk_ms": 90.874,
+      "p50_chunk_ms": 74.828,
+      "speedup_vs_baseline": 1.214
+    },
+    {
+      "waterfall": "end_to_end",
+      "cid": "E5",
+      "label": "+ Cache-DiT",
+      "quality_gate": "passed",
+      "action_drift": 0.006,
+      "baseline_p50_chunk_ms": 229.089,
+      "p50_chunk_ms": 59.283,
+      "speedup_vs_baseline": 3.864
+    },
+    {
+      "waterfall": "end_to_end",
+      "cid": "E6",
+      "label": "Final optimized latency",
+      "quality_gate": "passed",
+      "action_drift": 0.017,
+      "baseline_p50_chunk_ms": 229.089,
+      "p50_chunk_ms": 56.871,
+      "speedup_vs_baseline": 4.028
+    }
+  ]
+}

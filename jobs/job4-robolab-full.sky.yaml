@@ -1,0 +1,56 @@
+# Job 4 — full RoboLab evaluation (specification_revised.txt §4).
+#
+# INFRA PROVISIONING ONLY. Runs the COMPLETE RoboLab benchmark, and ONLY after the Job 3 subset
+# passes. Two configurations only (§4): baseline and final optimized production. Same RT-core
+# stack as Job 3; a thin variant of jobs/job3-robolab-subset.sky.yaml with MODE=full and the
+# full task list. ~30 GPU-hours for 100 tasks — do not run until the subset gate is green.
+#
+#   sky jobs launch jobs/job4-robolab-full.sky.yaml -c robolab-full \
+#     --env COSMOS_ENDPOINT_BASELINE=https://<baseline> \
+#     --env COSMOS_ENDPOINT_OPTIMIZED=https://<optimized> \
+#     --env OUTPUT_URI=s3://serverless-challenge/robolab-eval-results/full/
+
+name: robolab-full
+
+resources:
+  cloud: kubernetes
+  accelerators: L40S:1              # VERIFY: RT-core GPU, >=48 GB
+  cpus: 16+
+  memory: 128+
+  disk_size: 96                     # more episode videos than the subset
+  image_id: "docker:nvcr.io/nvidia/isaac-lab:2.3.2"   # VERIFY tag
+
+num_nodes: 1
+
+envs:
+  REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY
+  REPO_REF: "main"
+  ROBOLAB_REPO: "https://github.com/NVLabs/RoboLab.git"             # VERIFY
+  ROBOLAB_REF: "main"
+  MODE: "full"                      # complete benchmark — baseline + final production ONLY (§4)
+  TASKS: "RoboLab-120"              # VERIFY: task id / list the runner accepts
+  COSMOS_ENDPOINT_BASELINE: ""      # VERIFY URL
+  COSMOS_ENDPOINT_OPTIMIZED: ""     # VERIFY URL
+  SUCCESS_DROP_THRESHOLD: "0.03"
+  OUTPUT_URI: "s3://serverless-challenge/robolab-eval-results/full/"
+  AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
+
+setup: |
+  set -euo pipefail
+  command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  rm -rf cosmos-serving && git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" cosmos-serving
+  cd cosmos-serving && uv sync
+  rm -rf RoboLab && git clone --depth 1 --branch "${ROBOLAB_REF}" "${ROBOLAB_REPO}" RoboLab
+
+run: |
+  set -euo pipefail
+  export PATH="$HOME/.local/bin:$PATH"
+  cd cosmos-serving && nvidia-smi
+  # Precondition: the Job 3 subset gate passed for the optimized endpoint. VERIFY: drive the
+  # full RoboLab benchmark for baseline + optimized (see job3-robolab-subset.sky.yaml comments),
+  # aggregate per-task success, and publish. ~30 GPU-hours.
+  echo "MODE=${MODE} TASKS=${TASKS} — wire the full RoboLab runner (VERIFY), then publish."
+  if command -v aws >/dev/null 2>&1 && [ -d results/aggregate ]; then
+    aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+  fi

@@ -1,0 +1,10 @@
+{
+  "configuration": "E6",
+  "ok": true,
+  "is_baseline": false,
+  "started_at": "2026-07-14T08:17:05.851888+00:00",
+  "finished_at": "2026-07-14T08:17:05.857418+00:00",
+  "warmup_requests": 25,
+  "measured_requests": 256,
+  "error": null
+}

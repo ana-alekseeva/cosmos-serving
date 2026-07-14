@@ -34,7 +34,7 @@ The first pass inverted the report's emphasis and over-built the harness. Correc
 
 ## 1. Goal
 
-**Part 1 — Reproduce & attribute.** Reproduce NVIDIA's Cosmos 3 serving optimizations on **Nebius**, for **both towers**, packaged as a **workbench-compatible `optimize` command where you select individual techniques or the full bundle**. Show **how each technique contributes to latency** via a contribution waterfall.
+**Part 1 — Reproduce & attribute.** Reproduce NVIDIA's Cosmos 3 serving optimizations on **Nebius**, for **both towers**, packaged as an **in-repo `optimize` command where you select individual techniques or the full bundle**. The Nebius **workbench** (`npa`) is used only to **provision the infrastructure** that runs it (a serverless GPU job + the optimized-model endpoint) — it does not implement the optimization logic. Show **how each technique contributes to latency** via a contribution waterfall.
 
 **Part 2 — Improve.** Introduce **just one or two new techniques** on top to push latency further, and prove their contribution on the same plot.
 
@@ -63,7 +63,7 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
 | Generator serving | `vllm-project/vllm-omni` (recipe `recipes/cosmos3/Cosmos3-Nano.md`) | Apache-2.0 |
 | PyTorch reference inference (readable ablation path) | `NVIDIA/cosmos-framework` | OpenMDW-1.1 (verify) |
 | Weights | HF `nvidia/Cosmos3-Nano*` | OpenMDW-1.1 |
-| Deployment / orchestration + `optimize` slot | `nebius/nebius-physical-ai` (`npa workbench cosmos`) | Apache-2.0 |
+| Deployment / infra provisioning | `nebius/nebius-physical-ai` (`npa workbench cosmos`) | Apache-2.0 |
 
 ---
 
@@ -75,7 +75,7 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
 ### Part 1 — Reproduce (Reasoner → Generator)
 - **Reasoner (now):** robot task = next-action / visual reasoning (short video clip + task prompt → short reasoning/action output). Reproduce + attribute the Reasoner techniques (§6).
 - **Generator (next):** T2V + I2V (I2V ≈ action-conditioned world-model rollout). Reproduce + attribute the Generator techniques incl. CFG-Parallel (§6). 256p/480p for iteration, 720p for the headline number.
-- **Deliverable:** the selectable, workbench-compatible `optimize` command (§4/§5/§8) + contribution waterfall + stage breakdown per tower.
+- **Deliverable:** the selectable, in-repo `optimize` command (§4/§5/§8) + contribution waterfall + stage breakdown per tower.
 
 ### Part 2 — Improve (later)
 - Add **1–2 new techniques** targeting the dominant stage the Part-1 breakdown reveals; prove lossless (or guard if lossy); append to the same waterfall.
@@ -89,7 +89,7 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
 
 ## 4. Deliverables
 
-1. **Selectable, workbench-compatible `optimize`** (Part 1) — per-technique toggles + `--preset full|none`, for both towers, dropping into Nebius's `npa … cosmos optimize` slot (§5, §8).
+1. **Selectable, in-repo `optimize`** (Part 1) — per-technique toggles + `--preset full|none`, for both towers, implemented in this repo (`optimize/cli.py`); the workbench only provisions the Nebius infra that runs it (§5, §7, §8).
 2. **Technique-contribution waterfall** (per tower) — cumulative ablation, each bar = one technique's marginal latency contribution; `hw2/ablation.py` "vs V0 / vs prev" rendered as a waterfall. Part 2 appends new-technique bars.
 3. **Stage breakdown** (per tower) — where wall-clock goes, so each technique's win traces to the stage it shrinks.
 
@@ -102,21 +102,22 @@ From the Cosmos 3 technical report (arXiv 2606.02800) and prior analysis:
 
 ## 5. The selectable optimization interface (Part-1 core)
 
-One mechanism serves reproduction, attribution, and the workbench.
+One mechanism serves reproduction and attribution. The command lives in this repo
+(`python -m optimize.cli`); the workbench only provisions the Nebius infra to run it (§7).
 
 ### Technique toggles + presets
 Each NVIDIA technique (§6) is an independent switch; presets bundle them.
 
 ```
 # Generator: full package / naïve baseline / hand-picked subset
-npa workbench cosmos optimize --tower generator --preset full
-npa workbench cosmos optimize --tower generator --preset none
-npa workbench cosmos optimize --tower generator \
+python -m optimize.cli --tower generator --preset full
+python -m optimize.cli --tower generator --preset none
+python -m optimize.cli --tower generator \
     --enable reasoner-cache,cuda-graphs,cache-dit,fp8,vae-patch,cfg-parallel
 # Generator: cumulative latency waterfall + Table 9 batching throughput
-npa workbench cosmos optimize --tower generator --ablate --output json
+python -m optimize.cli --tower generator --ablate --out-dir results
 # Reasoner: stock-vLLM concurrency/shape sweep (no toggles; §0)
-npa workbench cosmos optimize --tower reasoner --output json
+python -m optimize.cli --tower reasoner --out-dir results
 ```
 
 - **Generator only:** `--preset full` = every Generator technique; `--preset none` = naïve baseline; `--enable a,b,c` = explicit subset.
@@ -201,16 +202,23 @@ media flags, so the FPS→frame counts and video/image input config are best-eff
 | **Generator serving** | **vLLM-Omni**, 2× H200 | NVIDIA's Generator serving approach; 2 GPUs enable CFG-Parallel. |
 | **Readable ablation / build techniques** | **cosmos-framework PyTorch reference path** | Report §5.3.1: primary target for new features, validated first here. Eager, per-stage timers. |
 | **Latency benchmark driver** | vLLM bench / **GenAI-Perf**; `hw2 time_generation` for eager | Standard, fast, reproducible (§5). |
-| **Deployment / orchestration + `optimize` slot** | Nebius `npa workbench cosmos` + MLflow | Ops shell; we add engine optimization behind its `optimize` command. |
+| **Deployment / infra provisioning** | Nebius `npa workbench cosmos` + MLflow | Ops shell; provisions the serverless GPU job that runs our repo `optimize` command + the optimized-model endpoint + the quality-guard job. |
 | **Instrumentation** | Adapted from `gpu_and_inference_hw` (§9) | Timing, profiling, ablation, roofline, plots. |
 
-### Workbench-compatibility — build into the `npa optimize` slot
-`optimize_cmd` is a reserved no-op placeholder (`typer.echo("not yet implemented")`), intended for "TensorRT compilation and quantization." We implement it. Mirror `npa/src/npa/{cli,workbench}/cosmos/`:
-- **CLI:** Typer `@app.command("optimize")` `optimize_cmd`, re-exported via `make_cli_wrapper("npa.cli.cosmos", "optimize_cmd", …)`. Options: `--tower {reasoner,generator}`, `--preset {none,full}`, `--enable <csv>`, `--ablate`, plus NVIDIA-style `--model`, `--backend`, `--no-guardrails`, `--output {text,json}`. Reuse `_get_config()`, `_output()`, `_fail()`, `Cosmos3ServeConfig`, `build_cosmos3_inference_args`.
-- **Backend:** expose the optimized engine as a `Backend` enum value (alongside `basic|nim|triton`) so `serve`/`deploy`/`autoscale`/`status` consume it unchanged.
-- **Workflow twin:** `npa.workflow/v0.0.1` YAML (`toolRef: workbench.cosmos3.optimize`, `resources.gpu.accelerators: H200:{1|2}`, `outputs` schema `npa.workbench.cosmos3.optimize.v1`) + `skypilotTwin`.
-- **Artifacts:** emit waterfall / breakdown JSON to `s3://.../{{run.id}}/optimize/…` with schema versioning.
-- **Module layout:** mirror `workbench.cosmos3.optimize` so upstreaming is a move, not a rewrite.
+### Workbench = infrastructure provisioning only (do NOT implement `npa optimize`)
+The `optimize` command lives in **this repo** (`optimize/cli.py`, run via `python -m optimize.cli`),
+not in the workbench. npa's built-in `optimize_cmd` slot (a `typer.echo("not yet implemented")`
+placeholder for "TensorRT compilation and quantization") is left **untouched** — we deliberately
+do not depend on or fill it. The workbench is used purely to provision Nebius infrastructure:
+- **Serverless GPU job:** an `npa.workflow` twin (+ `skypilotTwin`) that provisions the GPUs,
+  clones this repo, and runs its `optimize.cli` — see `jobs/cosmos3-ablation.*`. There is **no
+  `toolRef` to a workbench optimize tool**; the job just runs repo code and publishes artifacts.
+- **Optimized-model endpoint:** `npa workbench cosmos deploy --runtime serverless` with the
+  ablation-winning engine args passed through (`--extra-serve-args`) — see
+  `jobs/deploy-optimized.sh` / `workbench/optimized-deploy.config.yaml`.
+- **Quality-guard job:** the RoboLab-120 eval as a second provisioned job — `jobs/robolab-eval.*`.
+- **Artifacts:** the repo's `optimize.cli` emits waterfall / breakdown JSON to the results
+  bucket (`s3://serverless-challenge/cosmos3-ablation-results/`), with schema versioning.
 
 ---
 
@@ -223,7 +231,7 @@ media flags, so the FPS→frame counts and video/image input config are best-eff
 - **F4** Cumulative ablation → "vs V0 / vs prev" table → contribution waterfall.
 - **F5** Per-stage instrumentation (§4) + kernel trace export (torch.profiler → Perfetto; Nsight); breakdown reconciles ≤5%.
 - **F6** Roofline classification of dominant stages (compute- vs memory-bound).
-- **F7** Workbench-compatible `optimize` command + workflow twin (§7).
+- **F7** In-repo `optimize` command (§5); the workbench provisions the infra to run it — a serverless GPU job + the optimized-model endpoint + the quality-guard job (§7).
 - **F8 (Part 2)** New technique(s): numerical-equivalence test where lossless (SSIM≈1.0 / exact-match); appended to the same waterfall with marginal contribution.
 
 ### Non-functional
@@ -270,7 +278,7 @@ media flags, so the FPS→frame counts and video/image input config are best-eff
 4. Build the **technique-toggle registry + `--ablate`**; run the Reasoner ladder (R0→R8) → "vs V0 / vs prev".
 5. Stage-instrument the dominant variant + traces; reconcile ≤5%; roofline-classify.
 6. Ship the Reasoner **contribution waterfall + stage breakdown + findings**; quality-guard FP8/EVS.
-7. Wire the Reasoner path into the workbench-compatible `optimize` command (§7).
+7. Wire the Reasoner path into the repo's `optimize` command (§5); make it provisionable as a Nebius job (§7).
 
 ### Part 1b — Generator (next), 2× H200
 8. Deploy Generator via vLLM-Omni + eager path; reproduce NVIDIA 256p/480p/720p numbers.
@@ -279,12 +287,12 @@ media flags, so the FPS→frame counts and video/image input config are best-eff
 ### Part 2 — Improve (later)
 10. Pick **1–2 new techniques** for the dominant stage (candidates §14); implement in the eager path first, then vLLM-Omni.
 11. Prove lossless (F8); append to the same waterfall; report marginal contribution + E2E delta.
-12. Ship via `optimize` + workflow twin; capture Grafana/MLflow evidence.
+12. Ship via the repo's `optimize` command + the Nebius job/deploy specs (`jobs/`); capture Grafana/MLflow evidence.
 
 ---
 
 ## 12. Success criteria
-- **Part 1:** a workbench-compatible `optimize` command selecting any technique subset or `--preset full` for both towers; contribution waterfalls attributing each NVIDIA technique's saving across the four regimes, reconciling ≤5% to wall-clock; end-to-end within a documented margin of NVIDIA's numbers.
+- **Part 1:** an in-repo `optimize` command selecting any technique subset or `--preset full` for both towers; contribution waterfalls attributing each NVIDIA technique's saving across the four regimes, reconciling ≤5% to wall-clock; end-to-end within a documented margin of NVIDIA's numbers.
 - **Part 2:** 1–2 new techniques with a measurable marginal contribution on the same waterfall; lossless proven (or drift reported for a guarded lossy one); no regression on the quality guard.
 
 ---
@@ -292,9 +300,9 @@ media flags, so the FPS→frame counts and video/image input config are best-eff
 ## 13. Decisions (resolved)
 - Model **Cosmos 3 Nano**; **Reasoner 1× H200**, **Generator 2× H200**.
 - OP-D input = **short video clip**; **vLLM** (TensorRT-LLM deferred).
-- **Part 1 = reproduce all NVIDIA techniques** behind a **selectable, workbench-compatible `optimize`** (per-technique or full package); CFG-Parallel included on 2 GPUs.
+- **Part 1 = reproduce all NVIDIA techniques** behind a **selectable, in-repo `optimize` command** (per-technique or full package); CFG-Parallel included on 2 GPUs.
 - **Part 2 = 1–2 new techniques.** *(Which ones: picked from the Part-1 breakdown — see §14.)*
-- `npa optimize` is a placeholder we implement (§7).
+- `npa optimize` stays an upstream placeholder — **not** implemented here; the workbench only provisions infra (§7).
 
 ## 14. Part-2 candidate techniques (decide after the Part-1 breakdown)
 Lossless-preferred levers not covered by NVIDIA's set:
@@ -326,12 +334,12 @@ cosmos-serving/
     roofline.py      # extended GPU_SPECS + classification  [from hw1]
     plots.py         # plot_contribution_waterfall() + plot_stage_breakdown()  [from hw3]
     equivalence.py   # Part-2 lossless test (token/latent diff, SSIM)
-  optimize/          # engine techniques + toggle registry, shaped to upstream into npa.workbench.cosmos3.optimize
+  optimize/          # engine techniques + toggle registry — the repo's optimize command
     techniques/      # one module per toggle (kv_cache, cuda_graphs, cfg_parallel, cache_dit, fp8, vae_patch, evs, …)
     registry.py      # technique registry + presets (none/full) + --ablate order
-    cli.py           # optimize_cmd (Typer, npa semantics) — mirrors npa.cli.cosmos
-  workflows/
-    cosmos3-optimize.yaml   # npa.workflow/v0.0.1 twin (toolRef: workbench.cosmos3.optimize)
+    cli.py           # optimize CLI (python -m optimize.cli)
+  workbench/         # Nebius INFRA provisioning configs (deploy the optimized endpoint; serve DROID) + runbook
+  jobs/              # Nebius job specs: serverless ablation job + optimized deploy + RoboLab-eval (+ npa.workflow twins)
   observability/     # Prometheus/Grafana/DCGM + dashboards
   results/           # traces, PNGs, JSON, MLflow artifacts
 ```

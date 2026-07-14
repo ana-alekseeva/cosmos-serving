@@ -1,0 +1,973 @@
+{
+  "dataset": "cosmos-droid-replay",
+  "task": "DROID obs + instruction + proprio -> 32x8 action chunk",
+  "count": 50,
+  "static_shapes": {
+    "camera_views": [
+      "exterior",
+      "wrist"
+    ],
+    "image_hw": [
+      180,
+      320
+    ],
+    "proprio_dim": 8,
+    "instruction_tokens": 32,
+    "action_chunk": [
+      32,
+      8
+    ]
+  },
+  "requests": [
+    {
+      "request_id": 0,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 621010221,
+      "instruction": "pick up the red cube and place it in the bowl",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep0/step0"
+    },
+    {
+      "request_id": 1,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 581629513,
+      "instruction": "open the top drawer",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep0/step1"
+    },
+    {
+      "request_id": 2,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 0,
+      "control_timestep": 2,
+      "seed": 1925461315,
+      "instruction": "wipe the table with the sponge",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep0/step2"
+    },
+    {
+      "request_id": 3,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 0,
+      "control_timestep": 3,
+      "seed": 1168991433,
+      "instruction": "stack the blue block on the green block",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep0/step3"
+    },
+    {
+      "request_id": 4,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 4,
+      "control_timestep": 0,
+      "seed": 1359710734,
+      "instruction": "close the microwave door",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep4/step0"
+    },
+    {
+      "request_id": 5,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 4,
+      "control_timestep": 1,
+      "seed": 1663632797,
+      "instruction": "pour the beads into the cup",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep4/step1"
+    },
+    {
+      "request_id": 6,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 4,
+      "control_timestep": 2,
+      "seed": 144351009,
+      "instruction": "insert the peg into the hole",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep4/step2"
+    },
+    {
+      "request_id": 7,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 4,
+      "control_timestep": 3,
+      "seed": 1022632885,
+      "instruction": "hang the towel on the rack",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep4/step3"
+    },
+    {
+      "request_id": 8,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 1461113158,
+      "instruction": "put the banana on the plate",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep0/step0"
+    },
+    {
+      "request_id": 9,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 1292044009,
+      "instruction": "turn the knob clockwise",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep0/step1"
+    },
+    {
+      "request_id": 10,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 0,
+      "control_timestep": 2,
+      "seed": 536048325,
+      "instruction": "place the mug upright on the shelf",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep0/step2"
+    },
+    {
+      "request_id": 11,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 0,
+      "control_timestep": 3,
+      "seed": 702987056,
+      "instruction": "sort the red and blue blocks into bins",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep0/step3"
+    },
+    {
+      "request_id": 12,
+      "task": "RoboLab-tool_use-easy-0",
+      "episode_id": 4,
+      "control_timestep": 0,
+      "seed": 992988308,
+      "instruction": "pick up the red cube and place it in the bowl",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-easy-0/ep4/step0"
+    },
+    {
+      "request_id": 13,
+      "task": "RoboLab-tool_use-easy-0",
+      "episode_id": 4,
+      "control_timestep": 1,
+      "seed": 198737318,
+      "instruction": "open the top drawer",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-easy-0/ep4/step1"
+    },
+    {
+      "request_id": 14,
+      "task": "RoboLab-tool_use-easy-0",
+      "episode_id": 4,
+      "control_timestep": 2,
+      "seed": 1084319205,
+      "instruction": "wipe the table with the sponge",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-easy-0/ep4/step2"
+    },
+    {
+      "request_id": 15,
+      "task": "RoboLab-tool_use-easy-0",
+      "episode_id": 4,
+      "control_timestep": 3,
+      "seed": 73057436,
+      "instruction": "stack the blue block on the green block",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-easy-0/ep4/step3"
+    },
+    {
+      "request_id": 16,
+      "task": "RoboLab-tool_use-hard-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 1460813425,
+      "instruction": "close the microwave door",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-hard-0/ep0/step0"
+    },
+    {
+      "request_id": 17,
+      "task": "RoboLab-tool_use-hard-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 1385593332,
+      "instruction": "pour the beads into the cup",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-hard-0/ep0/step1"
+    },
+    {
+      "request_id": 18,
+      "task": "RoboLab-tool_use-hard-0",
+      "episode_id": 0,
+      "control_timestep": 2,
+      "seed": 1426620055,
+      "instruction": "insert the peg into the hole",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-hard-0/ep0/step2"
+    },
+    {
+      "request_id": 19,
+      "task": "RoboLab-tool_use-hard-0",
+      "episode_id": 0,
+      "control_timestep": 3,
+      "seed": 1903992999,
+      "instruction": "hang the towel on the rack",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-hard-0/ep0/step3"
+    },
+    {
+      "request_id": 20,
+      "task": "RoboLab-pick_place-medium-0",
+      "episode_id": 4,
+      "control_timestep": 0,
+      "seed": 402156001,
+      "instruction": "put the banana on the plate",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-medium-0/ep4/step0"
+    },
+    {
+      "request_id": 21,
+      "task": "RoboLab-pick_place-medium-0",
+      "episode_id": 4,
+      "control_timestep": 1,
+      "seed": 1309204335,
+      "instruction": "turn the knob clockwise",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-medium-0/ep4/step1"
+    },
+    {
+      "request_id": 22,
+      "task": "RoboLab-pick_place-medium-0",
+      "episode_id": 4,
+      "control_timestep": 2,
+      "seed": 1515231753,
+      "instruction": "place the mug upright on the shelf",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-medium-0/ep4/step2"
+    },
+    {
+      "request_id": 23,
+      "task": "RoboLab-pick_place-medium-0",
+      "episode_id": 4,
+      "control_timestep": 3,
+      "seed": 556247183,
+      "instruction": "sort the red and blue blocks into bins",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-medium-0/ep4/step3"
+    },
+    {
+      "request_id": 24,
+      "task": "RoboLab-articulated-easy-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 1139197571,
+      "instruction": "pick up the red cube and place it in the bowl",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-easy-0/ep0/step0"
+    },
+    {
+      "request_id": 25,
+      "task": "RoboLab-articulated-easy-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 660801698,
+      "instruction": "open the top drawer",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-easy-0/ep0/step1"
+    },
+    {
+      "request_id": 26,
+      "task": "RoboLab-articulated-easy-0",
+      "episode_id": 0,
+      "control_timestep": 2,
+      "seed": 1162748682,
+      "instruction": "wipe the table with the sponge",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-easy-0/ep0/step2"
+    },
+    {
+      "request_id": 27,
+      "task": "RoboLab-articulated-easy-0",
+      "episode_id": 0,
+      "control_timestep": 3,
+      "seed": 2021804751,
+      "instruction": "stack the blue block on the green block",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-easy-0/ep0/step3"
+    },
+    {
+      "request_id": 28,
+      "task": "RoboLab-articulated-hard-0",
+      "episode_id": 4,
+      "control_timestep": 0,
+      "seed": 1975218456,
+      "instruction": "close the microwave door",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-hard-0/ep4/step0"
+    },
+    {
+      "request_id": 29,
+      "task": "RoboLab-articulated-hard-0",
+      "episode_id": 4,
+      "control_timestep": 1,
+      "seed": 734884558,
+      "instruction": "pour the beads into the cup",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-hard-0/ep4/step1"
+    },
+    {
+      "request_id": 30,
+      "task": "RoboLab-articulated-hard-0",
+      "episode_id": 4,
+      "control_timestep": 2,
+      "seed": 751042864,
+      "instruction": "insert the peg into the hole",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-hard-0/ep4/step2"
+    },
+    {
+      "request_id": 31,
+      "task": "RoboLab-articulated-hard-0",
+      "episode_id": 4,
+      "control_timestep": 3,
+      "seed": 648528804,
+      "instruction": "hang the towel on the rack",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-hard-0/ep4/step3"
+    },
+    {
+      "request_id": 32,
+      "task": "RoboLab-tool_use-medium-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 1206586926,
+      "instruction": "put the banana on the plate",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-medium-0/ep0/step0"
+    },
+    {
+      "request_id": 33,
+      "task": "RoboLab-tool_use-medium-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 1936599425,
+      "instruction": "turn the knob clockwise",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-medium-0/ep0/step1"
+    },
+    {
+      "request_id": 34,
+      "task": "RoboLab-tool_use-medium-0",
+      "episode_id": 0,
+      "control_timestep": 2,
+      "seed": 1409345014,
+      "instruction": "place the mug upright on the shelf",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-medium-0/ep0/step2"
+    },
+    {
+      "request_id": 35,
+      "task": "RoboLab-tool_use-medium-0",
+      "episode_id": 0,
+      "control_timestep": 3,
+      "seed": 1886601714,
+      "instruction": "sort the red and blue blocks into bins",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-medium-0/ep0/step3"
+    },
+    {
+      "request_id": 36,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 4,
+      "control_timestep": 0,
+      "seed": 1008386492,
+      "instruction": "pick up the red cube and place it in the bowl",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep4/step0"
+    },
+    {
+      "request_id": 37,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 4,
+      "control_timestep": 1,
+      "seed": 2069795673,
+      "instruction": "open the top drawer",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep4/step1"
+    },
+    {
+      "request_id": 38,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 4,
+      "control_timestep": 2,
+      "seed": 189667382,
+      "instruction": "wipe the table with the sponge",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep4/step2"
+    },
+    {
+      "request_id": 39,
+      "task": "RoboLab-pick_place-easy-0",
+      "episode_id": 4,
+      "control_timestep": 3,
+      "seed": 99956187,
+      "instruction": "stack the blue block on the green block",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-easy-0/ep4/step3"
+    },
+    {
+      "request_id": 40,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 742453701,
+      "instruction": "close the microwave door",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep0/step0"
+    },
+    {
+      "request_id": 41,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 1964126992,
+      "instruction": "pour the beads into the cup",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep0/step1"
+    },
+    {
+      "request_id": 42,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 0,
+      "control_timestep": 2,
+      "seed": 1980646046,
+      "instruction": "insert the peg into the hole",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep0/step2"
+    },
+    {
+      "request_id": 43,
+      "task": "RoboLab-pick_place-hard-0",
+      "episode_id": 0,
+      "control_timestep": 3,
+      "seed": 1946817750,
+      "instruction": "hang the towel on the rack",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-pick_place-hard-0/ep0/step3"
+    },
+    {
+      "request_id": 44,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 4,
+      "control_timestep": 0,
+      "seed": 1618288871,
+      "instruction": "put the banana on the plate",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep4/step0"
+    },
+    {
+      "request_id": 45,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 4,
+      "control_timestep": 1,
+      "seed": 540701606,
+      "instruction": "turn the knob clockwise",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep4/step1"
+    },
+    {
+      "request_id": 46,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 4,
+      "control_timestep": 2,
+      "seed": 1974124559,
+      "instruction": "place the mug upright on the shelf",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep4/step2"
+    },
+    {
+      "request_id": 47,
+      "task": "RoboLab-articulated-medium-0",
+      "episode_id": 4,
+      "control_timestep": 3,
+      "seed": 270372090,
+      "instruction": "sort the red and blue blocks into bins",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-articulated-medium-0/ep4/step3"
+    },
+    {
+      "request_id": 48,
+      "task": "RoboLab-tool_use-easy-0",
+      "episode_id": 0,
+      "control_timestep": 0,
+      "seed": 1617973862,
+      "instruction": "pick up the red cube and place it in the bowl",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-easy-0/ep0/step0"
+    },
+    {
+      "request_id": 49,
+      "task": "RoboLab-tool_use-easy-0",
+      "episode_id": 0,
+      "control_timestep": 1,
+      "seed": 430709506,
+      "instruction": "open the top drawer",
+      "camera_views": [
+        "exterior",
+        "wrist"
+      ],
+      "image_hw": [
+        180,
+        320
+      ],
+      "proprio_dim": 8,
+      "instruction_tokens": 32,
+      "capture_ref": "robolab://RoboLab-tool_use-easy-0/ep0/step1"
+    }
+  ]
+}

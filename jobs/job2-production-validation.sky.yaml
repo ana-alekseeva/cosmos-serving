@@ -1,0 +1,64 @@
+# Job 2 — production-engine validation (specification_revised.txt §4).
+#
+# INFRA PROVISIONING ONLY. Validates ONLY the production baseline (E0) and the final optimized
+# configuration (E6) through the PRODUCTION serving stack — vLLM (Reasoner, Qwen3-VL path) +
+# vLLM-Omni (Generator / full policy). Does NOT repeat the whole ablation matrix (§4); that is
+# Job 1's readable PyTorch path. Produces §2 required output #5: "Production results using vLLM
+# and vLLM-Omni".
+#
+# The spec notes this MAY be two jobs if vLLM and vLLM-Omni need incompatible environments
+# (vLLM Reasoner validation; vLLM-Omni Generator/full-policy validation). Split by running with
+# CONFIGS="R0,R4" on a vLLM image and CONFIGS="E0,E6" on a vLLM-Omni image if so.
+#
+#   sky jobs launch jobs/job2-production-validation.sky.yaml --secret HF_TOKEN \
+#     --env CONFIGS=E0,E6
+
+name: cosmos-policy-production
+
+resources:
+  cloud: kubernetes
+  accelerators: H200:1              # single-request, batch-1 production latency (§6)
+  cpus: 16+
+  memory: 128+
+  image_id: "docker:vllm/vllm-omni:cosmos3"   # VERIFY tag (or split: vllm-only vs vllm-omni image)
+
+num_nodes: 1
+
+envs:
+  REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY
+  REPO_REF: "main"
+  MODEL: "nvidia/Cosmos3-Nano-Policy-DROID"
+  CONFIGS: "E0,E6"                  # production baseline + final optimized ONLY (§4)
+  OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/production/"
+  AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
+
+setup: |
+  set -euo pipefail
+  command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  rm -rf cosmos-serving && git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" cosmos-serving
+  cd cosmos-serving && uv sync && uv pip install cosmos-guardrail
+
+run: |
+  set -euo pipefail
+  export PATH="$HOME/.local/bin:$PATH"
+  : "${HF_TOKEN:?HF_TOKEN required}"
+  huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential || true
+  cd cosmos-serving && nvidia-smi
+  # Same real replay set as Job 1 (§8): capture is deterministic, so the 50 DROID observations
+  # are identical here. Production is always real (--backend vllm below).
+  mkdir -p /local/replay
+  uv pip install tensorflow-datasets
+  uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
+
+  # Production baseline + final ONLY, through the vLLM / vLLM-Omni serving stack.
+  uv run python run_matrix.py \
+    --input-manifest /local/replay/manifest.json \
+    --output-dir results-production \
+    --backend vllm \
+    --configurations "${CONFIGS}"
+  uv run python aggregate.py --out-dir results-production
+
+  if command -v aws >/dev/null 2>&1; then
+    aws s3 cp results-production/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+  fi

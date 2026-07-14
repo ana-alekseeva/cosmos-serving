@@ -1,0 +1,86 @@
+# Job 1 — PyTorch ablation matrix (specification_revised.txt §4).
+#
+# INFRA PROVISIONING ONLY. npa provisions ONE target inference GPU (Terraform-backed Nebius
+# AI Job — no manual Kubernetes); this file declares the resources + the command. The ablation
+# LOGIC is this repo's run_matrix.py (cloned + run below), which runs every single-GPU
+# configuration (R0-R4, G0-G5, E0-E6) as an isolated subprocess so each releases its CUDA
+# context, applies the §8 bias controls, then aggregates (Job 5) into waterfalls + breakdown.
+#
+# ONE GPU (§3: "Do not mix different GPU counts in the primary waterfall"). The separate
+# multi-GPU experiment (CFG-/Ulysses-Parallel) is jobs/job1b-multigpu.sky.yaml.
+#
+#   sky jobs launch jobs/job1-ablation-matrix.sky.yaml \
+#     --secret HF_TOKEN \
+#     --env OUTPUT_URI=s3://serverless-challenge/cosmos3-ablation-results/
+#
+# Every `# VERIFY` must be confirmed against your Nebius project before trusting numbers.
+
+name: cosmos-policy-ablation
+
+resources:
+  cloud: kubernetes                 # npa-managed Nebius k8s (Terraform-provisioned)
+  accelerators: H200:1              # ONE inference GPU — the primary single-GPU waterfall (§3)
+  cpus: 16+
+  memory: 128+
+  image_id: "docker:vllm/vllm-omni:cosmos3"   # VERIFY tag: ships torch + vllm + vllm-omni + cosmos3
+
+num_nodes: 1
+
+envs:
+  REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY (this repo)
+  REPO_REF: "main"
+  MODEL: "nvidia/Cosmos3-Nano-Policy-DROID"
+  OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/"
+  AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
+  BACKEND: "vllm"                   # real backend for the production numbers; "mock" for a dry run
+  # HF_TOKEN injected as a secret: `sky jobs launch --secret HF_TOKEN ...`
+
+setup: |
+  set -euo pipefail
+  apt-get update && apt-get install -y --no-install-recommends git ffmpeg || true
+  command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  rm -rf cosmos-serving
+  git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" cosmos-serving
+  cd cosmos-serving
+  uv sync
+  uv pip install cosmos-guardrail            # license-mandated Generator guard (present in the base image otherwise)
+
+run: |
+  set -euo pipefail
+  export PATH="$HOME/.local/bin:$PATH"
+  : "${HF_TOKEN:?HF_TOKEN required — pass with: sky jobs launch --secret HF_TOKEN ...}"
+  huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential || true
+  cd cosmos-serving
+  nvidia-smi
+
+  # Stage the fixed replay set locally BEFORE timing (§8); each config measures the 50 obs once.
+  # REAL run: capture 50 real DROID observations (same set for Jobs 1 & 2). MOCK dry run: use the
+  # committed synthetic fixture. Either way -> /local/replay/manifest.json.
+  mkdir -p /local/replay
+  if [ "${BACKEND}" = "mock" ]; then
+    cp policy/mock/manifest.json /local/replay/manifest.json
+  else
+    uv pip install tensorflow-datasets
+    uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
+  fi
+
+  # 1) Full single-GPU ablation matrix (R0-R4, G0-G5, E0-E6) with §8 bias controls.
+  #    Each configuration is an isolated subprocess (releases its CUDA context on exit).
+  uv run python run_matrix.py \
+    --config config/experiment.yaml \
+    --checkpoint-dir /local/model \
+    --input-manifest /local/replay/manifest.json \
+    --output-dir results \
+    --backend "${BACKEND}"
+
+  # 2) Aggregate (Job 5) — waterfalls + stage breakdown + CIs + CSV/Parquet + quality tables.
+  uv run python aggregate.py --out-dir results
+
+  # 3) Publish artifacts to Nebius object storage.
+  if command -v aws >/dev/null 2>&1; then
+    aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+    echo "results -> ${OUTPUT_URI}"
+  else
+    echo "aws CLI absent; results in $(pwd)/results/aggregate" >&2
+  fi
