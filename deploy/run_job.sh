@@ -64,21 +64,37 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # overlay: a full overlay makes cublasLt fail to write its cache and report NOT_INITIALIZED.
 export CUDA_CACHE_PATH=/local/.nv_cache; mkdir -p "$CUDA_CACHE_PATH"
 
-# Preflight: report GPU memory AND disk, and prove cuBLAS works BEFORE loading the ~30GB model, so a
-# cuBLAS failure is diagnosed (broken node vs GPU-OOM vs DISK-full vs model) in ~5s, not 1min/config.
+# Preflight: disk/mem are fine but a TRIVIAL matmul fails with a cuBLAS error, so this is a
+# CUDA-13/driver/cuBLAS-library mismatch on the node, not the harness. Capture the driver + nvidia-*
+# wheel versions and a per-dtype GEMM result so we know WHICH mismatch (too-old driver vs bad wheel).
 echo "== PREFLIGHT =="
-df -h / /tmp /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
-CUDA_LAUNCH_BLOCKING=1 python - <<'PY' || { echo "PREFLIGHT FAILED: GPU/cuBLAS broken on this node (check the df lines above for a full disk). Not the harness."; exit 1; }
-import torch
-print("PREFLIGHT torch", torch.__version__, "cuda", torch.version.cuda, "cudnn", torch.backends.cudnn.version())
+df -h / /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/PREFLIGHT smi /'
+rc=0; python - <<'PY' || rc=$?
+import torch, sys
+from importlib.metadata import version, PackageNotFoundError
+def v(p):
+    try: return version(p)
+    except PackageNotFoundError: return "absent"
+print("PREFLIGHT torch", torch.__version__, "toolkit_cuda", torch.version.cuda,
+      "driver_cuda", torch._C._cuda_getDriverVersion(), "cudnn", torch.backends.cudnn.version())
+print("PREFLIGHT wheels cublas", v("nvidia-cublas-cu13"), "cudnn", v("nvidia-cudnn-cu13"),
+      "cuda_runtime", v("nvidia-cuda-runtime-cu13"))
 print("PREFLIGHT gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
-free, total = torch.cuda.mem_get_info()
-print(f"PREFLIGHT mem free={free/1e9:.1f}GB total={total/1e9:.1f}GB")
-a = torch.randn(4096, 4096, device="cuda", dtype=torch.bfloat16)
-print("PREFLIGHT bf16-GEMM mean =", float((a @ a).float().mean()))
-print("PREFLIGHT OK — GPU/cuBLAS fine; a P-config CUBLAS failure is then OOM or model-specific")
+ok = True
+for dt in ("float32", "float16", "bfloat16"):
+    try:
+        a = torch.randn(1024, 1024, device="cuda", dtype=getattr(torch, dt)); (a @ a).float().sum().item()
+        print(f"PREFLIGHT GEMM {dt}: OK")
+    except Exception as e:
+        ok = False; print(f"PREFLIGHT GEMM {dt}: FAIL {type(e).__name__}: {str(e)[:110]}")
+sys.exit(0 if ok else 2)
 PY
 echo "== END PREFLIGHT =="
+if [ "$rc" -ne 0 ]; then
+  echo "PREFLIGHT: basic GEMM failed on this node -> CUDA-13/driver/cuBLAS mismatch (versions above), NOT the harness. Aborting before the 30GB model load."
+  exit 1
+fi
 
 cfg=(); [ -n "$CONFIGS" ] && cfg=(--configurations "$CONFIGS")
 if [ "$MODE" = multigpu ]; then
