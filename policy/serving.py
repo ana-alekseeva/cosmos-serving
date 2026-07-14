@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import time
 import urllib.error
@@ -87,7 +88,33 @@ def engine_args(config: Config) -> list[str]:
     args += ["--guidance-scale", str(s.guidance)]                      # VERIFY flag name
     args += ["--flow-shift", str(s.shift)]                             # VERIFY flag name
     args += ["--cfg-mode", s.cfg_mode]                                 # VERIFY flag + accepted value
+
+    # Multi-GPU (jobs/job2b, §5.3.3): tensor-parallel across N GPUs + the parallel strategy —
+    # CFG-Parallel dispatches the cond/uncond forwards to separate ranks; Ulysses shards the
+    # sequence. Driven by env so a job sets it without touching the config matrix.
+    tp = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
+    if tp > 1:
+        args += ["--tensor-parallel-size", str(tp)]                    # VERIFY flag
+        parallel = os.environ.get("PARALLEL", "cfg")                  # cfg | ulysses
+        if parallel == "cfg":
+            args += ["--cfg-parallel", "true"]                        # VERIFY flag (CFG-Parallel)
+        elif parallel == "ulysses":
+            args += ["--context-parallel", "ulysses"]                 # VERIFY flag (Ulysses CP)
     return args
+
+
+def start_profile(endpoint: str) -> None:
+    """Start vLLM's server-side torch profiler (traces -> VLLM_TORCH_PROFILER_DIR on the server).
+    Set VLLM_TORCH_PROFILER_DIR in the server env before launch, then call this before the
+    measured request and stop_profile() after. VERIFY the /start_profile route on your build."""
+    urllib.request.urlopen(urllib.request.Request(endpoint.rstrip("/") + "/start_profile",
+                                                  method="POST"), timeout=30)
+
+
+def stop_profile(endpoint: str) -> None:
+    """Stop vLLM's profiler; the server flushes the Chrome trace to VLLM_TORCH_PROFILER_DIR."""
+    urllib.request.urlopen(urllib.request.Request(endpoint.rstrip("/") + "/stop_profile",
+                                                  method="POST"), timeout=120)
 
 
 def sdpa_attention_snippet() -> str:

@@ -29,6 +29,7 @@ envs:
   REPO_REF: "main"
   # MODEL is read from config/experiment.yaml (single source of truth), not an env var.
   CONFIGS: "E0,E6"                  # production baseline + final optimized ONLY (§4)
+  VLLM_TORCH_PROFILER_DIR: "/local/vllm_traces"   # vLLM writes Chrome traces here on /start_profile
   OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/production/"
   AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
 
@@ -47,7 +48,7 @@ run: |
   cd cosmos-serving && nvidia-smi
   # Same real replay set as Job 1 (§8): capture is deterministic, so the 50 DROID observations
   # are identical here. Production is always real (--backend vllm below).
-  mkdir -p /local/replay
+  mkdir -p /local/replay "${VLLM_TORCH_PROFILER_DIR}"
   uv pip install tensorflow-datasets tensorflow-cpu
   uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
 
@@ -66,4 +67,5 @@ run: |
   if command -v aws >/dev/null 2>&1; then
     aws s3 cp results-production/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
     aws s3 cp results-production/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+    aws s3 cp "${VLLM_TORCH_PROFILER_DIR}/" "${OUTPUT_URI}raw/traces/" --recursive --endpoint-url "${AWS_ENDPOINT_URL}" || true
   fi
