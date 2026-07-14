@@ -142,11 +142,28 @@ if [ "$rc" -ne 0 ]; then
     "$PYMODEL" /tmp/raw_cublas.py "" || true
   fi
 fi
+# Import smoke: the matrix's engine imports are lazy (policy/pytorch_engine.py) and run_matrix
+# swallows per-config errors, so a missing dep (e.g. iopath) otherwise surfaces only AFTER the
+# capture + 30GB download, once per config. Fail here, in seconds, with the real ImportError.
+irc=0
+if [ "$rc" -eq 0 ]; then
+  mods="import policy.runner"
+  [ "$BACKEND" = pytorch ] && mods="import iopath, policy.runner, policy.pytorch_engine, \
+cosmos_framework.inference.args, cosmos_framework.scripts.action_policy_server_robolab, \
+cosmos_framework.scripts.action_policy_server_utils"
+  "$PYMODEL" -c "$mods; print('PREFLIGHT imports OK')" || irc=$?
+fi
 echo "== END PREFLIGHT =="
 if [ "$rc" -ne 0 ]; then
   echo "PREFLIGHT: trivial GEMM fails with every cuBLAS build. RAW lines above tell you which:"
   echo "PREFLIGHT:   raw sgemm=0 but torch FAIL -> torch-side (report with these numbers)"
   echo "PREFLIGHT:   raw sgemm!=0 too          -> node/driver problem -> retry on another node / report to Nebius"
+  echo "PREFLIGHT: aborting before the 30GB model load."
+  exit 1
+fi
+if [ "$irc" -ne 0 ]; then
+  echo "PREFLIGHT: the matrix's own imports fail in the model venv (ImportError above) — the venv"
+  echo "PREFLIGHT: is missing deps even after uv sync. Rebuild the image from the current Dockerfile."
   echo "PREFLIGHT: aborting before the 30GB model load."
   exit 1
 fi

@@ -66,18 +66,24 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 #    conflicting groups, so this native image selects cu130 (the vLLM E-ladder needs a separate
 #    --group vllm image). Then bump cuDNN >= 9.22 for the fused-attention backend (the cu130 group
 #    pins 9.15.1, which is too old; cuDNN kept -cu13).
+#    NB: NEVER `uv run` after the pip overrides — `uv run` auto-syncs the project env back to the
+#    lock, silently undoing them (use .venv/bin/python directly).
 RUN cd /opt/cosmos-framework \
     && uv sync --all-extras --group cu130 --group policy-server \
     && uv pip install "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96" \
     && uv pip install -e /opt/cosmos-serving \
-    && cuver="$(uv run python -c 'import torch; print(torch.backends.cudnn.version() or 0)')" \
-    && cumaj="$(uv run python -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')" \
+    && py=/opt/cosmos-framework/.venv/bin/python \
+    && cuver="$($py -c 'import torch; print(torch.backends.cudnn.version() or 0)')" \
+    && cumaj="$($py -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')" \
     && echo "cuDNN in image: ${cuver} (cu${cumaj} torch build)" \
     && if [ "${cuver:-0}" -lt 92200 ]; then \
          echo "bumping nvidia-cudnn-cu${cumaj}>=9.22 for the cuDNN fused-attention backend"; \
          uv pip install -U "nvidia-cudnn-cu${cumaj}>=9.22"; \
-         uv run python -c 'import torch; print("cuDNN baked:", torch.backends.cudnn.version())'; \
-       fi
+         $py -c 'import torch; print("cuDNN baked:", torch.backends.cudnn.version())'; \
+       fi \
+    # import smoke: a missing dep (e.g. iopath) fails the BUILD, not a GPU job 4 stages in
+    && $py -c 'import iopath, cosmos_framework, policy; print("import smoke OK")' \
+    && $py -c 'from importlib.metadata import version; print("baked cublas", version("nvidia-cublas"), "cudnn", version("nvidia-cudnn-cu13"))'
 
 # Fast-scratch mount point (model weights + replay set land here at runtime).
 RUN mkdir -p /local/model /local/replay
