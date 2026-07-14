@@ -46,12 +46,11 @@ python -m policy.capture --n "$REPLAY_N" --out /local/replay
 [ "$BACKEND" = pytorch ] && hf download "$MODEL" --local-dir /local/model
 
 # --- run in the MODEL venv (torch + cosmos_framework + policy) ---
-# Self-heal images baked with the cu130 uv group: it re-pins the nvidia-cu13 CUDA libs
-# (cuDNN 9.15.1 + the group's cuBLAS) to a set that fails cuBLASLt init on H200
-# (CUBLAS_STATUS_NOT_INITIALIZED at the first GEMM). Re-sync WITHOUT the cu130 group (matches
-# deploy/setup.sh, the build that produced the working results-real) so the current registry image
-# runs with no rebuild. Idempotent: a near no-op once the image is rebuilt from the fixed Dockerfile.
-( cd "$FRAMEWORK" && uv sync --all-extras --group policy-server \
+# Ensure the model venv actually HAS torch's CUDA libraries. torch 2.10.0+cu130 needs
+# nvidia-cublas-cu13 + nvidia-cuda-runtime-cu13, which are provided by the `cu130` group. Dropping
+# cu130 STRIPPED cuBLAS -> torch fell back to the base image's system CUDA and every GEMM failed with
+# CUBLAS_STATUS_INVALID_VALUE. Sync WITH cu130 so the pip cuBLAS matching this torch build is present.
+( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server \
     && uv pip install -qU "nvidia-cudnn-cu13>=9.22" )
 # shellcheck disable=SC1091
 source "$FRAMEWORK/.venv/bin/activate"

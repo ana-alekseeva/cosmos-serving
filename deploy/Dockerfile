@@ -57,16 +57,14 @@ RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_R
 # 1) Harness venv: mock / capture (tfds+tf-cpu via the `capture` extra) / vLLM tooling.
 RUN cd /opt/cosmos-serving && uv sync --extra capture
 
-# 2) Model venv for the NATIVE-PyTorch path (§5.3.1): EXACTLY the command deploy/setup.sh uses —
-#    the one that produced the working results-real on this H200 (torch 2.10.0+cu130 from the cosmos
-#    index + cosmos_framework + policy-server + this harness editable so `import policy` works).
-#    Do NOT add `--group cu130`: that group re-pins the nvidia-cu13 CUDA libraries (cuDNN 9.15.1 +
-#    the group's cuBLAS) to a set that fails cuBLASLt init at runtime on H200
-#    (CUBLAS_STATUS_NOT_INITIALIZED at the first GEMM). `--all-extras` selects NEITHER the `vllm` nor
-#    the `cu130` group, so there is no vllm/cu130 conflict, and base/extras already resolve the
-#    working cu130 torch. We still bump cuDNN >= 9.22 below for the fused-attention backend.
+# 2) Model venv for the NATIVE-PyTorch path (§5.3.1): the `cu130` group is REQUIRED — it provides
+#    torch 2.10.0+cu130 AND its CUDA library wheels (nvidia-cublas-cu13 + nvidia-cuda-runtime-cu13).
+#    Without it torch has no matching cuBLAS and every GEMM fails with CUBLAS_STATUS_INVALID_VALUE.
+#    cosmos-framework declares `vllm` and `cu130` as conflicting groups, so this native image selects
+#    cu130 (the vLLM E-ladder needs a separate --group vllm image). Then bump cuDNN >= 9.22 for the
+#    fused-attention backend (the cu130 group pins 9.15.1, which is too old).
 RUN cd /opt/cosmos-framework \
-    && uv sync --all-extras --group policy-server \
+    && uv sync --all-extras --group cu130 --group policy-server \
     && uv pip install -e /opt/cosmos-serving \
     && cuver="$(uv run python -c 'import torch; print(torch.backends.cudnn.version() or 0)')" \
     && cumaj="$(uv run python -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')" \
