@@ -66,7 +66,7 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 #    fused-attention backend (torch loads cuDNN from the wheel; the bump raises cudnn.version() at
 #    runtime — torch.cuda.is_available() is False during build, so it only flips True on the GPU box).
 RUN cd /opt/cosmos-framework \
-    && uv sync --group cu130 --group policy-server \
+    && uv sync --all-extras --group cu130 --group policy-server \
     && uv pip install -e /opt/cosmos-serving \
     && cuver="$(uv run python -c 'import torch; print(torch.backends.cudnn.version() or 0)')" \
     && cumaj="$(uv run python -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')" \
