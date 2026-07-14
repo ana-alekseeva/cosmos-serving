@@ -47,11 +47,12 @@ The Reasoner is measured only as part of action-policy conditioning; it does not
 
 | ID   | Configuration                                      |
 | ---- | -------------------------------------------------- |
-| `R0` | Eager BF16 with math attention                     |
-| `R1` | Add Flash/fused attention                          |
-| `R2` | Add `torch.compile`                                |
-| `R3` | Add CUDA graph replay                              |
-| `R4` | Cache Reasoner conditioning across diffusion steps |
+| `R0` | BF16 + cuDNN fused attention (baseline)            |
+| `R1` | Add `torch.compile`                                |
+| `R2` | Add CUDA graph replay                              |
+| `R3` | Cache Reasoner conditioning across diffusion steps |
+
+**Attention baseline (R/G).** The native-PyTorch reference path runs on `cosmos_framework`, whose attention dispatcher exposes only *fused* backends (cuDNN / FlashAttention-2/3 / NATTEN) — there is no math/SDPA backend. So the R/G baseline is torch-native **cuDNN fused attention** (flash-class), pinned via `I4_ATTN_BACKENDS=cudnn` and needing no `flash_attn` build (only cuDNN ≥ 9.22 in the torch runtime). There is therefore no separate "math" baseline or "+Flash" rung on R/G; the math-vs-flash comparison is retained on the end-to-end vLLM ladder (`E0` TORCH_SDPA → `E1` FLASH_ATTN), where both backends exist.
 
 Reasoner caching must be enabled only after verifying that its output is invariant throughout one action-denoising trajectory. The cache must be invalidated for every new observation.
 
@@ -59,12 +60,11 @@ Reasoner caching must be enabled only after verifying that its output is invaria
 
 | ID   | Configuration                  |
 | ---- | ------------------------------ |
-| `G0` | Eager BF16 with math attention |
-| `G1` | Add Flash/fused attention      |
-| `G2` | Add `torch.compile`            |
-| `G3` | Add CUDA graph replay          |
-| `G4` | Add Cache-DiT                  |
-| `G5` | Add dynamic FP8 quantization   |
+| `G0` | BF16 + cuDNN fused attention (baseline) |
+| `G1` | Add `torch.compile`            |
+| `G2` | Add CUDA graph replay          |
+| `G3` | Add Cache-DiT                  |
+| `G4` | Add dynamic FP8 quantization   |
 
 Cache-DiT and FP8 are quality-gated. They are included in the final configuration only when RoboLab performance remains acceptable.
 
@@ -118,8 +118,8 @@ Do not include CPU offload, HSDP, or VAE patch parallelism in the main latency w
 Runs all single-GPU configurations sequentially as subprocesses:
 
 ```text
-R0–R4
-G0–G5
+R0–R3
+G0–G4
 combined end-to-end configurations
 ```
 

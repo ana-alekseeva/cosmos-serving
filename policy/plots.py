@@ -1,6 +1,6 @@
 """Figures (specification_revised.txt §2 required outputs 2-4, §3).
 
-  plot_waterfall          Reasoner (R0-R4) / Generator (G0-G5) / end-to-end (E0-E6)
+  plot_waterfall          Reasoner (R0-R3) / Generator (G0-G4) / end-to-end (E0-E6)
                           contribution waterfalls — descending staircase, marginal %
                           drop per rung, 95% bootstrap CI whiskers.
   plot_stage_breakdown    Baseline vs final stacked stage composition (the six §3 stages).
@@ -67,8 +67,8 @@ def plot_waterfall(data: dict, out_path: str | Path, title: str | None = None) -
                     (len(rungs) - 1, p50[-1]), textcoords="offset points", xytext=(0, 24),
                     ha="center", fontsize=9, color=COLOR_BAR, fontweight="bold")
 
-    name = {"reasoner": "Reasoner conditioning (R0→R4)",
-            "generator": "Generator (G0→G5)",
+    name = {"reasoner": "Reasoner conditioning (R0→R3)",
+            "generator": "Generator (G0→G4)",
             "end_to_end": "End-to-end cumulative (E0→E6)"}.get(data["waterfall"], data["waterfall"])
     ax.set_title(title or f"Cosmos3-Nano-Policy-DROID — {name} latency waterfall", fontsize=12)
     ax.set_ylabel(data["metric_label"])

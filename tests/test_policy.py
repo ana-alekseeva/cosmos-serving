@@ -39,18 +39,18 @@ from policy import robolab
 
 # -- Config matrix (§3) -----------------------------------------------------------
 def test_ladders_match_spec():
-    assert [c.cid for c in REASONER_LADDER] == ["R0", "R1", "R2", "R3", "R4"]
-    assert [c.cid for c in GENERATOR_LADDER] == ["G0", "G1", "G2", "G3", "G4", "G5"]
+    assert [c.cid for c in REASONER_LADDER] == ["R0", "R1", "R2", "R3"]
+    assert [c.cid for c in GENERATOR_LADDER] == ["G0", "G1", "G2", "G3", "G4"]
     assert [c.cid for c in END_TO_END_LADDER] == ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
-    # baselines are eager, no technique added
+    # baselines add no technique (R/G start from the cuDNN fused-attention baseline)
     for lad in (REASONER_LADDER, GENERATOR_LADDER, END_TO_END_LADDER):
         assert lad[0].added == "" and not lad[0].lossy
 
 
 def test_only_cachedit_and_fp8_are_lossy():
     lossy = {c.cid for c in all_configs() if c.lossy}
-    # G4 Cache-DiT, G5 FP8, and every E-rung that has enabled them (E5, E6)
-    assert lossy == {"G4", "G5", "E5", "E6"}
+    # G3 Cache-DiT, G4 FP8, and every E-rung that has enabled them (E5, E6)
+    assert lossy == {"G3", "G4", "E5", "E6"}
 
 
 def test_end_to_end_ladder_is_the_union_spec_lists():
@@ -117,15 +117,15 @@ def test_reasoner_sampling_is_deterministic():
 def test_reasoner_cache_amortizes_conditioning():
     req = build_mock_replay(1)[0]
     r0 = make_engine("mock", config_by_id("R0")).run_request(req)   # recompute per step
-    r4 = make_engine("mock", config_by_id("R4")).run_request(req)   # cache -> once
+    r3 = make_engine("mock", config_by_id("R3")).run_request(req)   # cache -> once
     # Naive recomputes conditioning every denoising step; caching does it once, so the win
     # scales with the step count (~N_DENOISE_STEPS x), not a fixed factor.
-    assert r0.reasoner_ms > (N_DENOISE_STEPS - 1) * r4.reasoner_ms
+    assert r0.reasoner_ms > (N_DENOISE_STEPS - 1) * r3.reasoner_ms
 
 
 def test_generator_waterfall_isolates_the_reasoner():
     # In the generator waterfall the reasoner is held at its single-conditioning cost, so it
-    # is (nearly) constant across G0..G5 — only generator stages move.
+    # is (nearly) constant across G0..G4 — only generator stages move.
     req = build_mock_replay(1)[0]
     reasoners = [make_engine("mock", c).run_request(req).reasoner_ms for c in GENERATOR_LADDER]
     assert max(reasoners) - min(reasoners) < 5.0                    # ~constant (only jitter)
@@ -209,14 +209,14 @@ def test_robolab_subset_gate_passes_for_final():
 
 # -- Native PyTorch backend / technique compatibility (§5.3.1 vs §5.3.3) -----------
 def test_pytorch_backend_rejects_vllm_only_techniques():
-    # Cache-DiT (G4/E5) and FP8 (G5/E6) are vLLM-Omni-only (§5.3.3) — not native PyTorch.
-    for cid in ("G4", "G5", "E5", "E6"):
+    # Cache-DiT (G3/E5) and FP8 (G4/E6) are vLLM-Omni-only (§5.3.3) — not native PyTorch.
+    for cid in ("G3", "G4", "E5", "E6"):
         c = config_by_id(cid)
         assert not compat.supported(c, "pytorch")
         with pytest.raises(UnsupportedTechnique):
             make_engine("pytorch", c)          # __init__ validates -> refuses
-    # The §5.3.1 rungs ARE native-PyTorch.
-    for cid in ("R0", "R1", "R2", "R3", "R4", "G0", "G1", "G2", "G3", "E0", "E1", "E2", "E3", "E4"):
+    # The §5.3.1 rungs ARE native-PyTorch (R0-R3, the lossless G0-G2, and E0-E4).
+    for cid in ("R0", "R1", "R2", "R3", "G0", "G1", "G2", "E0", "E1", "E2", "E3", "E4"):
         assert compat.supported(config_by_id(cid), "pytorch")
 
 
@@ -236,9 +236,9 @@ def test_end_to_end_and_lossy_route_to_vllm():
     #   the whole end-to-end (E) ladder + the Cache-DiT/FP8 rungs (§5.3.2/§5.3.3).
     for cid in ("E0", "E1", "E2", "E3", "E4", "E5", "E6"):
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
-    for cid in ("G4", "G5"):                          # Cache-DiT / FP8 -> vLLM-Omni
+    for cid in ("G3", "G4"):                          # Cache-DiT / FP8 -> vLLM-Omni
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
-    for cid in ("R0", "R4", "G0", "G3"):              # native §5.3.1 reference rungs
+    for cid in ("R0", "R3", "G0", "G2"):              # native §5.3.1 reference rungs
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "pytorch"
     for c in all_configs():                           # mock dry-run: everything modeled
         assert compat.resolve_backend(c, "mock") == "mock"

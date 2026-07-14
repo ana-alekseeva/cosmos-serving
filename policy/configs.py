@@ -2,9 +2,16 @@
 
 Three waterfalls, all single-GPU, batch size 1:
 
-  Reasoner conditioning waterfall  R0 -> R4   (measures `reasoner_ms`)
-  Generator waterfall              G0 -> G5   (measures `generator_prepare_ms` + `denoising_ms`)
-  End-to-end cumulative waterfall  E0 -> E7   (measures `total_chunk_ms`)
+  Reasoner conditioning waterfall  R0 -> R3   (measures `reasoner_ms`)
+  Generator waterfall              G0 -> G4   (measures `generator_prepare_ms` + `denoising_ms`)
+  End-to-end cumulative waterfall  E0 -> E6   (measures `total_chunk_ms`)
+
+Attention baseline: the native-PyTorch reference path (R/G) runs on cosmos_framework, whose
+attention dispatcher has NO math/SDPA backend — only fused kernels (flash2/flash3/cuDNN/NATTEN).
+So the R/G baseline is torch-native cuDNN *fused* attention (flash-class), forced via
+I4_ATTN_BACKENDS=cudnn (policy/pytorch_engine.py); there is no separate math baseline or "+Flash"
+rung. The math-vs-flash comparison is realizable only on the vLLM E-ladder (E0 TORCH_SDPA -> E1
+FLASH_ATTN, policy/serving.py), which is why it is retained there.
 
 Each rung adds ONE technique to the previous one (cumulative). The end-to-end ladder is
 exactly the union the spec lists:
@@ -66,7 +73,7 @@ N_DENOISE_STEPS = GENERATOR_SAMPLING.steps
 @dataclass(frozen=True)
 class Config:
     """One rung of a waterfall = one cumulative optimization configuration."""
-    cid: str                       # "R0" ... "G5" ... "E3"
+    cid: str                       # "R0" ... "G4" ... "E6"
     waterfall: str                 # REASONER | GENERATOR | END_TO_END
     label: str                     # human label for tables/plots
     index: int                     # position on its ladder (0 = baseline)
@@ -83,19 +90,20 @@ class Config:
 # stage(s) it touches (divisor > 1 == faster). Cumulative = product along the ladder.
 #
 # Anchors:
-#   - Flash/fused attention: attention-bound stages shrink (reasoner ~1.30, denoise ~1.25).
+#   - Flash/fused attention (E-ladder / vLLM only): attention-bound stages shrink (reasoner
+#     ~1.30, denoise ~1.25). The R/G reference path is already cuDNN-fused, so it has no such rung.
 #   - torch.compile: kernel fusion + less host overhead (~1.12-1.15).
 #   - CUDA graph replay: removes per-launch overhead; big when the loop is many small
 #     kernels (denoise ~1.15), modest on the VLM prefill (~1.10). Not double-counted with
 #     compile — measured as the *additional* drop over compile (§9).
-#   - Reasoner conditioning cache (R4 / E4): conditioning is invariant across the denoising
+#   - Reasoner conditioning cache (R3 / E4): conditioning is invariant across the denoising
 #     trajectory, so compute it ONCE per observation instead of every step. In the naive
 #     baseline the conditioning is recomputed each of N_DENOISE_STEPS steps; caching removes
 #     the (N-1)x. Modeled by `reasoner_cached` (see policy/pipeline.py). Must be invalidated
 #     per new observation (§3).
 #   - Cache-DiT (G4 / E5, lossy): reuse cached DiT block outputs across adjacent steps ->
 #     fewer effective step-compute (~1.40 on the denoise loop).
-#   - FP8 (G5 / E6, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
+#   - FP8 (G4 / E6, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
 #     peak memory.
 # ---------------------------------------------------------------------------
 _FLASH_REASONER = 1.30
@@ -114,25 +122,23 @@ def _mul(d: dict, stage: str, factor: float) -> None:
     d[stage] = round(d.get(stage, 1.0) * factor, 5)
 
 
-# ---- Reasoner conditioning waterfall: R0 -> R4 ------------------------------------
+# ---- Reasoner conditioning waterfall: R0 -> R3 ------------------------------------
+# cuDNN fused-attention baseline (see module docstring): no math baseline / "+Flash" rung on
+# this native-PyTorch reference path — the framework has no math backend.
 def _reasoner_ladder() -> list[Config]:
     m: dict = {}   # cumulative multipliers on reasoner_conditioning
     rows = [
-        ("R0", "Eager BF16, math attention", "", {}, False),
-        ("R1", "+ Flash/fused attention", "flash-attention",
-         {"attention": "flash"}, False),
-        ("R2", "+ torch.compile", "torch.compile",
+        ("R0", "BF16 + cuDNN fused attention", "", {}, False),
+        ("R1", "+ torch.compile", "torch.compile",
          {"compile": True}, False),
-        ("R3", "+ CUDA graph replay", "cuda-graphs",
+        ("R2", "+ CUDA graph replay", "cuda-graphs",
          {"cuda_graphs": True}, False),
-        ("R4", "+ Reasoner conditioning cache", "reasoner-conditioning-cache",
+        ("R3", "+ Reasoner conditioning cache", "reasoner-conditioning-cache",
          {"reasoner_cache": True}, False),
     ]
     out, cached = [], False
     for i, (cid, label, added, flags, lossy) in enumerate(rows):
-        if added == "flash-attention":
-            _mul(m, "reasoner_conditioning", _FLASH_REASONER)
-        elif added == "torch.compile":
+        if added == "torch.compile":
             _mul(m, "reasoner_conditioning", _COMPILE_REASONER)
         elif added == "cuda-graphs":
             _mul(m, "reasoner_conditioning", _CUDAGRAPH_REASONER)
@@ -147,22 +153,21 @@ def _reasoner_ladder() -> list[Config]:
     return out
 
 
-# ---- Generator waterfall: G0 -> G5 ------------------------------------------------
+# ---- Generator waterfall: G0 -> G4 ------------------------------------------------
+# cuDNN fused-attention baseline like the R ladder (no math / "+Flash" rung). Cache-DiT + FP8
+# are the lossy vLLM-Omni rungs (§5.3.3), routed off this path by compat.resolve_backend.
 def _generator_ladder() -> list[Config]:
     m: dict = {}   # cumulative multipliers on generator_prepare + action_denoising
     rows = [
-        ("G0", "Eager BF16, math attention", "", {}, False),
-        ("G1", "+ Flash/fused attention", "flash-attention", {"attention": "flash"}, False),
-        ("G2", "+ torch.compile", "torch.compile", {"compile": True}, False),
-        ("G3", "+ CUDA graph replay", "cuda-graphs", {"cuda_graphs": True}, False),
-        ("G4", "+ Cache-DiT", "cache-dit", {"cache_dit": True}, True),
-        ("G5", "+ Dynamic FP8 quantization", "fp8", {"quantization": "fp8"}, True),
+        ("G0", "BF16 + cuDNN fused attention", "", {}, False),
+        ("G1", "+ torch.compile", "torch.compile", {"compile": True}, False),
+        ("G2", "+ CUDA graph replay", "cuda-graphs", {"cuda_graphs": True}, False),
+        ("G3", "+ Cache-DiT", "cache-dit", {"cache_dit": True}, True),
+        ("G4", "+ Dynamic FP8 quantization", "fp8", {"quantization": "fp8"}, True),
     ]
     out = []
     for i, (cid, label, added, flags, lossy) in enumerate(rows):
-        if added == "flash-attention":
-            _mul(m, "action_denoising", _FLASH_DENOISE)
-        elif added == "torch.compile":
+        if added == "torch.compile":
             _mul(m, "action_denoising", _COMPILE_DENOISE)
             _mul(m, "generator_prepare", _COMPILE_PREP)
         elif added == "cuda-graphs":
@@ -185,8 +190,8 @@ def _end_to_end_ladder() -> list[Config]:
     mr: dict = {}   # reasoner_conditioning multipliers
     mg: dict = {}   # generator (prepare + denoise) multipliers
     rows = [
-        ("E0", "Baseline eager", "", {}, False),
-        ("E1", "+ Flash Attention", "flash-attention", {"attention": "flash"}, False),
+        ("E0", "Baseline eager (math attn / TORCH_SDPA)", "", {}, False),
+        ("E1", "+ Flash Attention (FLASH_ATTN)", "flash-attention", {"attention": "flash"}, False),
         ("E2", "+ torch.compile", "torch.compile", {"compile": True}, False),
         ("E3", "+ CUDA graphs", "cuda-graphs", {"cuda_graphs": True}, False),
         ("E4", "+ Reasoner conditioning cache", "reasoner-conditioning-cache",
@@ -242,7 +247,7 @@ def ladder(waterfall: str) -> list[Config]:
 def all_configs() -> list[Config]:
     """Every rung of every ladder — the full single-GPU matrix run by run_matrix.py.
 
-    Order: R0-R4, G0-G5, E0-E6 (the combined end-to-end configurations)."""
+    Order: R0-R3, G0-G4, E0-E6 (the combined end-to-end configurations)."""
     return [*REASONER_LADDER, *GENERATOR_LADDER, *END_TO_END_LADDER]
 
 

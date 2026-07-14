@@ -15,7 +15,7 @@ steps — not the 20 of the spec's illustrative example row:
 The per-step cost (5.8 ms) folds in the full-range CFG two-forward cost; re-anchor it (and
 the stage costs above) from an on-box eager trace before trusting absolute numbers.
 
-Reasoner conditioning cache (R4 / E4): the conditioning is invariant across the denoising
+Reasoner conditioning cache (R3 / E4): the conditioning is invariant across the denoising
 trajectory, so the naive baseline recomputes it every one of N_DENOISE_STEPS steps; caching
 computes it ONCE per observation. Modeled by REASONER_RECOMPUTE_FRACTION (=1.0, full
 recompute). The generator waterfall isolates the generator, so it always holds the reasoner

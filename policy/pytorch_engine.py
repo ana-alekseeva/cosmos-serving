@@ -14,6 +14,10 @@ CUDA graphs -> use_cuda_graphs (injected via a RobolabServerArgs subclass since 
 does not expose them). FP8 + Cache-DiT are vLLM-Omni-only (§5.3.3) -> those configs route to the
 vllm backend (policy/compat.resolve_backend), never here.
 
+Attention is fixed to cuDNN *fused* attention (flash-class) here: cosmos_framework's dispatcher
+offers no math/SDPA backend, so the R/G reference ladders have no math-vs-flash rung (that lives on
+the vLLM E-ladder). prepare() pins it with I4_ATTN_BACKENDS=cudnn — no flash_attn build required.
+
 Requires cosmos_framework on the box. Every cosmos symbol is a `# VERIFY` against your version;
 the reasoner/denoiser submodule names are the main thing to confirm (a warning prints the model
 children if the defaults miss).
@@ -132,7 +136,16 @@ class PyTorchPolicyEngine:
         self._hooks = None
 
     def prepare(self) -> None:
+        import os
+
         import torch
+
+        # Attention backend (§5.3.1). cosmos_framework's dispatcher has no math/SDPA backend —
+        # only fused kernels — so the reference baseline is torch-native cuDNN *fused* attention
+        # (flash-class), which needs no flash_attn build (only cuDNN >= 9.22 in the torch runtime).
+        # I4_ATTN_BACKENDS is read at attention-call time, so setting it before the model runs is
+        # enough; setdefault lets a box override it (e.g. "flash2" if flash_attn is installed).
+        os.environ.setdefault("I4_ATTN_BACKENDS", "cudnn")
 
         self._svc = _build_service(self.checkpoint, self.config, GENERATOR_SAMPLING)
         self._model = self._svc.model

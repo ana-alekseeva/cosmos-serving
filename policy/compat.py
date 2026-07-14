@@ -4,8 +4,9 @@ The report splits the optimizations across two backends, and this module encodes
 so a config can only run techniques its backend actually supports:
 
   * §5.3.1 Plain PyTorch — the modifiable REFERENCE path. Single-GPU latency techniques:
-      torch.compile, CUDA-graph replay (reduce-overhead), Reasoner-tower caching,
-      + attention-backend choice (math/flash SDPA).
+      torch.compile, CUDA-graph replay (reduce-overhead), Reasoner-tower caching. Attention is
+      fixed to cuDNN fused attention here (no math backend exists in cosmos_framework), so the
+      math-vs-flash "attention" toggle only applies on the vLLM E-ladder (§5.3.3).
   * §5.3.3 vLLM-Omni — the production Generator runtime. Adds, on top of the above:
       Cache-DiT and dynamic FP8 quantization (plus multi-GPU / memory features handled
       elsewhere).
@@ -22,7 +23,7 @@ from __future__ import annotations
 
 # stage_flags key -> (human name, report section that owns it).
 TECHNIQUES = {
-    "attention": ("attention backend (math/flash SDPA)", "§5.3.1"),
+    "attention": ("attention backend (math/flash SDPA, vLLM E-ladder)", "§5.3.3"),
     "compile": ("torch.compile", "§5.3.1"),
     "cuda_graphs": ("CUDA-graph replay", "§5.3.1"),
     "reasoner_cache": ("Reasoner-tower caching", "§5.3.1"),
