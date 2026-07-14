@@ -132,6 +132,18 @@ docker build --platform linux/amd64 -f deploy/Dockerfile -t "$IMAGE" . # x86_64 
 docker push "$IMAGE"
 ```
 
+> **Gotcha — the CR path uses the registry id *without* the `registry-` prefix.** `nebius registry get`
+> shows the id as `registry-e00k6drmprp0pm6zcf`, but the Container Registry data plane addresses the
+> registry by the bare `e00k6drmprp0pm6zcf`. If you tagged/pushed with the prefixed form you get
+> `error from registry: repository name not known to registry: Entity Registry not found by id registry-e00…`
+> (login still succeeds and the layers reach "Waiting" — it's a *path* mismatch, not auth). Retag to the
+> bare id and push — no rebuild:
+> ```bash
+> docker tag  cr.${REGION}.nebius.cloud/registry-e00k6drmprp0pm6zcf/cosmos-droid-bench-native:latest \
+>             cr.${REGION}.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-bench-native:latest
+> docker push cr.${REGION}.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-bench-native:latest
+> ```
+
 Launch a job — [deploy/run_job.sh](deploy/run_job.sh) is the env-driven entrypoint (stages replay + model,
 runs the matrix, aggregates, optional S3 upload). Load secrets from `.env` first so the `$VARS` expand:
 ```bash
