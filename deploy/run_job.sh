@@ -46,12 +46,13 @@ python -m policy.capture --n "$REPLAY_N" --out /local/replay
 [ "$BACKEND" = pytorch ] && hf download "$MODEL" --local-dir /local/model
 
 # --- run in the MODEL venv (torch + cosmos_framework + policy) ---
-# Ensure the model venv actually HAS torch's CUDA libraries. torch 2.10.0+cu130 needs
-# nvidia-cublas-cu13 + nvidia-cuda-runtime-cu13, which are provided by the `cu130` group. Dropping
-# cu130 STRIPPED cuBLAS -> torch fell back to the base image's system CUDA and every GEMM failed with
-# CUBLAS_STATUS_INVALID_VALUE. Sync WITH cu130 so the pip cuBLAS matching this torch build is present.
+# torch 2.10.0+cu130 must load its OWN pip cuBLAS/cuda-runtime wheels, but uv sync is lock-driven and
+# cosmos-framework's lock leaves them out (it expects the box's system CUDA). In this
+# nvidia/cuda:13.0.0-devel image torch then falls back to the image's system cuBLAS and every GEMM
+# fails with CUBLAS_STATUS_INVALID_VALUE. Install the pip nvidia-cu13 CUDA libs EXPLICITLY after the
+# sync (uv sync prunes anything not in the lock) so torch uses its matching, self-contained cuBLAS.
 ( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server \
-    && uv pip install -qU "nvidia-cudnn-cu13>=9.22" )
+    && uv pip install -qU "nvidia-cudnn-cu13>=9.22" nvidia-cublas-cu13 nvidia-cuda-runtime-cu13 )
 # shellcheck disable=SC1091
 source "$FRAMEWORK/.venv/bin/activate"
 
