@@ -50,5 +50,6 @@ run: |
   uv run python run_multigpu.py --backend vllm --manifest /local/replay/manifest.json --out-dir results
 
   if command -v aws >/dev/null 2>&1; then
+    aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
     aws s3 cp results/aggregate/multigpu.json "${OUTPUT_URI}" --endpoint-url "${AWS_ENDPOINT_URL}"
   fi

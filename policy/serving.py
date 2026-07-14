@@ -16,6 +16,12 @@ vLLM / vLLM-Omni before trusting a number. Two responsibilities:
 """
 from __future__ import annotations
 
+import base64
+import json
+import subprocess
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 
 from policy.configs import GENERATOR_SAMPLING, REASONER_SAMPLING, Config
@@ -101,24 +107,58 @@ class ServerHandle:
     _proc: object = None
 
     def close(self) -> None:
-        if self._proc is not None:
-            try:
-                self._proc.terminate()
-            except Exception:
-                pass
+        proc = self._proc
+        if proc is None:
+            return
+        self._proc = None
+        try:
+            proc.terminate()
+            proc.wait(timeout=30)               # let it drain the CUDA context (§4)
+        except subprocess.TimeoutExpired:
+            proc.kill()                          # force if it will not exit
+        except Exception:
+            pass
 
 
-def start_policy_server(model: str, config: Config, *, port: int = 8000) -> ServerHandle:
-    """Launch vLLM-Omni with `config`'s engine flags, wait until /health is ready.
+# Serve entrypoint (# VERIFY against your install: `vllm serve --omni` vs a dedicated
+# vllm-omni CLI). engine_args() already carries --model and the per-config technique flags.
+SERVE_CMD = ("vllm", "serve", "--omni")
+HEALTH_ROUTE = "/health"                         # VERIFY readiness route
+INFER_ROUTE = "/v1/policy/infer"                 # VERIFY inference route
 
-    VERIFY: the serve entrypoint (`vllm serve --omni ...`), the flags in engine_args(), the
-    static-shape / bucketing config CUDA-graph rungs need (§9), and the readiness probe.
+
+def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
+                        port: int = 8000, ready_timeout_s: float = 900.0) -> ServerHandle:
+    """Launch vLLM-Omni with `config`'s engine flags and block until /health is 200.
+
+    VERIFY on-box: the serve entrypoint (SERVE_CMD), that every engine_args() flag is accepted,
+    the static-shape / bucketing config the CUDA-graph rungs need (§9), and the readiness route.
     """
-    raise NotImplementedError(
-        "start_policy_server is the on-GPU stub. Run on the vLLM-Omni box after confirming "
-        "engine_args() flags; the mock backend covers everything else. Args would be:\n  "
-        + " ".join(["vllm", "serve", "--omni", *engine_args(config)])
-    )
+    cmd = [*SERVE_CMD, *engine_args(config), "--host", host, "--port", str(port)]
+    proc = subprocess.Popen(cmd)                 # inherits stdout/stderr -> job logs
+    base_url = f"http://{host}:{port}"
+    health = base_url + HEALTH_ROUTE
+    deadline = time.monotonic() + ready_timeout_s
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:              # server died during startup
+            raise RuntimeError(
+                f"policy server exited early (code {proc.returncode}). cmd: {' '.join(cmd)}")
+        try:
+            with urllib.request.urlopen(health, timeout=5) as r:
+                if r.status == 200:
+                    return ServerHandle(base_url=base_url, _proc=proc)
+        except (urllib.error.URLError, OSError):
+            pass                                 # not up yet
+        time.sleep(3)
+    proc.terminate()
+    raise TimeoutError(f"policy server not ready within {ready_timeout_s:.0f}s at {health}")
+
+
+def _encode_image(arr) -> dict:
+    """Compact on-wire image: base64 of the raw uint8 bytes + shape/dtype (NOT a nested int
+    list — a 180x320x3 frame is ~170k ints in JSON). VERIFY the endpoint expects this shape."""
+    return {"b64": base64.b64encode(arr.tobytes()).decode("ascii"),
+            "shape": [int(x) for x in arr.shape], "dtype": str(arr.dtype)}
 
 
 def build_request_payload(req, model: str) -> dict:
@@ -133,30 +173,51 @@ def build_request_payload(req, model: str) -> dict:
     obs = load_capture(req.capture_ref)             # real DROID observation (exterior/wrist/proprio)
     return {
         "model": model,
-        "images": {                                 # VERIFY: encoding (raw uint8 / base64 / URL)
-            "exterior": obs["exterior"].tolist(),
-            "wrist": obs["wrist"].tolist(),
+        "images": {                                 # base64(uint8 bytes) + shape (VERIFY schema)
+            "exterior": _encode_image(obs["exterior"]),
+            "wrist": _encode_image(obs["wrist"]),
         },
-        "proprio": obs["proprio"].tolist(),         # 8-D joint(7)+gripper(1)
+        "proprio": [float(x) for x in obs["proprio"]],   # 8-D joint(7)+gripper(1)
         "prompt": obs["instruction"],
         "sampling": reasoner_sampling_params(),     # conditioning decode params (fixed, §10)
+        "seed": req.seed,                           # fixed inference seed (reproducibility, §10)
     }
+
+
+# §7 per-stage keys the server must return under `latency_ms` (CUDA-event timers).
+_REQUIRED_STAGE_KEYS = ("preprocess", "h2d", "reasoner", "generator_prepare",
+                        "denoising", "postprocess", "d2h")
 
 
 def submit_policy_request(endpoint: str, model: str, req, config: Config) -> dict:
     """POST one DROID observation, return the §7 per-stage timing block.
 
-    The payload (built by build_request_payload) carries the real captured observation + the
-    Reasoner conditioning decode params; the Generator recipe is baked into the server via
-    engine_args() — both fixed across the replay set.
+    The payload (build_request_payload) carries the real captured observation + the Reasoner
+    conditioning decode params; the Generator recipe is baked into the server via engine_args()
+    — both fixed across the replay set.
 
-    VERIFY: the transport (POST endpoint + payload schema), the action-chunk response shape
-    (32x8), and that the server returns CUDA-event stage timers under `latency_ms`
-    (preprocess/h2d/reasoner/generator_prepare/denoising/postprocess/d2h).
+    VERIFY on-box: the inference route (INFER_ROUTE) + payload schema, the action-chunk response
+    shape (32x8), and that the server returns CUDA-event stage timers under `latency_ms`
+    (preprocess/h2d/reasoner/generator_prepare/denoising/postprocess/d2h) plus `server_ms`.
     """
-    payload = build_request_payload(req, model)     # real DROID tensors, ready to POST
-    raise NotImplementedError(
-        "submit_policy_request is the on-GPU stub. POST build_request_payload(req, model) to "
-        f"{endpoint!r} and parse its per-stage timing response; the mock models this offline. "
-        f"(payload has keys: {sorted(payload)})"
-    )
+    payload = build_request_payload(req, model)
+    data = json.dumps(payload).encode("utf-8")
+    url = endpoint.rstrip("/") + INFER_ROUTE
+    request = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as resp:   # VERIFY server-side budget
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"policy endpoint {url} returned {e.code}: {e.read()[:500]!r}") from e
+
+    # The client (policy/pipeline.py VLLMPolicyEngine.run_request) reads server_ms + a latency_ms
+    # block with every stage key; fail loudly if the contract is not met rather than mis-timing.
+    latency = body.get("latency_ms")
+    if "server_ms" not in body or not isinstance(latency, dict):
+        raise KeyError(f"policy response missing server_ms/latency_ms; got keys {sorted(body)}")
+    missing = [k for k in _REQUIRED_STAGE_KEYS if k not in latency]
+    if missing:
+        raise KeyError(f"policy response latency_ms missing stages {missing}; got {sorted(latency)}")
+    return body

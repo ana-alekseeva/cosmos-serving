@@ -73,6 +73,7 @@ run: |
   #     --endpoint-candidate "${COSMOS_ENDPOINT_OPTIMIZED}" --out-dir results
   echo "MODE=${MODE} threshold=${SUCCESS_DROP_THRESHOLD} — wire the RoboLab runner (VERIFY) then gate."
 
-  if command -v aws >/dev/null 2>&1 && [ -d results/aggregate ]; then
-    aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+  if command -v aws >/dev/null 2>&1 && [ -d results ]; then
+    aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
+    [ -d results/aggregate ] && aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
   fi

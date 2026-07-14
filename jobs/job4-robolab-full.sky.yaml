@@ -51,6 +51,7 @@ run: |
   # full RoboLab benchmark for baseline + optimized (see job3-robolab-subset.sky.yaml comments),
   # aggregate per-task success, and publish. ~30 GPU-hours.
   echo "MODE=${MODE} TASKS=${TASKS} — wire the full RoboLab runner (VERIFY), then publish."
-  if command -v aws >/dev/null 2>&1 && [ -d results/aggregate ]; then
-    aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
+  if command -v aws >/dev/null 2>&1 && [ -d results ]; then
+    aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
+    [ -d results/aggregate ] && aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
   fi

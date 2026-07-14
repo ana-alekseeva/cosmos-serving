@@ -77,10 +77,12 @@ run: |
   # 2) Aggregate (Job 5) — waterfalls + stage breakdown + CIs + CSV/Parquet + quality tables.
   uv run python aggregate.py --out-dir results
 
-  # 3) Publish artifacts to Nebius object storage.
+  # 3) Publish to Nebius object storage: RAW per-config logs (every <cid>.jsonl + summary /
+  #    environment / system-info / status) to raw/, plus the aggregate figures/tables at the top.
   if command -v aws >/dev/null 2>&1; then
+    aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
     aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
-    echo "results -> ${OUTPUT_URI}"
+    echo "raw logs -> ${OUTPUT_URI}raw/ ; aggregate -> ${OUTPUT_URI}"
   else
-    echo "aws CLI absent; results in $(pwd)/results/aggregate" >&2
+    echo "aws CLI absent; results in $(pwd)/results" >&2
   fi
