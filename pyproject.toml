@@ -1,3 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Only `policy` (+ subpackages) is an importable package; jobs/deploy/config/results/workbench
+# are not. Declaring this lets `uv pip install -e .` work (e.g. into cosmos-framework's env for
+# the native PyTorch backend) without setuptools' flat-layout auto-discovery erroring. The
+# top-level run_*.py stay as scripts, run from the repo root.
+[tool.setuptools.packages.find]
+include = ["policy*"]
+
 [project]
 name = "cosmos-serving"
 version = "0.2.0"
