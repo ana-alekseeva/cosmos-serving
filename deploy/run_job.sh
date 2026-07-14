@@ -37,17 +37,18 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 
 # --- CUDA sanity FIRST: a broken node/cuBLAS should fail here in ~1 min, BEFORE the replay
 # capture and the 30GB model download. ---
-# torch 2.10.0+cu130 must load its OWN pip CUDA wheels, but cosmos-framework's lock leaves
-# cuBLAS/cuda-runtime out (it expects the box's system CUDA), so torch falls back to this
-# nvidia/cuda:13.0.0-devel image's OLDER system cuBLAS (13.0 vs the 13.1 torch was built against).
-# Do NOT `uv sync` here: the image is already synced to that same lock, so a runtime sync only
-# PRUNES the fixes (these wheels, the cuDNN>=9.22 bump, the baked editable cosmos-serving).
+# The cu130 group pins nvidia-cublas==13.1.0.3 (torch 2.10+cu130's own pin) — BROKEN on
+# Hopper/Blackwell + r580 drivers: trivial GEMMs fail with CUBLAS_STATUS_INVALID_VALUE
+# (vllm#35028 is this exact stack; pytorch#174949 is the cu12 twin, fixed by a newer cuBLAS).
+# 13.1.1.3 is the patched pin torch 2.13+cu130 ships — override to it. NB this is why setup.sh
+# runs fine on a VM: without a cu-group it gets PyPI torch 2.10.0 = the cu128 build + cuBLAS
+# 12.8.4.1, which works on the same GPU/driver.
+# Do NOT `uv sync` here: the image is already synced to the lock, so a runtime sync only PRUNES
+# the fixes (this cuBLAS override, the cuDNN>=9.22 bump, the baked editable cosmos-serving).
 # Names: PyPI renamed the CUDA-13 libs — nvidia-cublas-cu13 / nvidia-cuda-runtime-cu13 are dead
 # 0.0.1 stubs; the real wheels are UNSUFFIXED nvidia-cublas / nvidia-cuda-runtime. cuDNN kept -cu13.
-# Versions: torch 2.10's own pin nvidia-cublas==13.1.0.3 is BROKEN on Hopper/Blackwell + r580
-# drivers — trivial GEMMs fail with CUBLAS_STATUS_INVALID_VALUE (pytorch#174949 is the cu12 twin,
-# vllm#35028 is this exact cu130 stack). 13.1.1.3 is the patched pin torch 2.13+cu130 ships.
-# If that still fails, the preflight escalates to the newest cuBLAS via LD_PRELOAD before giving up.
+# If the pin still fails, the preflight escalates to the newest cuBLAS via LD_PRELOAD, and dumps a
+# raw-cuBLAS probe (torch-side vs node-side) before giving up.
 # NB: `uv pip install` targets the active $VIRTUAL_ENV — pin --python or libs land in the wrong venv.
 PYMODEL="$FRAMEWORK/.venv/bin/python"
 uv pip install -qU --python "$PYMODEL" \

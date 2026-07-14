@@ -57,15 +57,15 @@ RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_R
 # 1) Harness venv: mock / capture (tfds+tf-cpu via the `capture` extra) / vLLM tooling.
 RUN cd /opt/cosmos-serving && uv sync --extra capture
 
-# 2) Model venv for the NATIVE-PyTorch path (§5.3.1): the `cu130` group is REQUIRED — it provides
-#    torch 2.10.0+cu130. But the lock LEAVES OUT torch's cuBLAS/cuda-runtime wheels (it expects the
-#    box's system CUDA), and this image's system cuBLAS (13.0) is older than the 13.1 torch was
-#    built against, so every GEMM fails with CUBLAS_STATUS_INVALID_VALUE. Bake the wheels torch
-#    declares — NOTE the names: PyPI's nvidia-cublas-cu13 / nvidia-cuda-runtime-cu13 are dead 0.0.1
-#    stubs; the real CUDA-13 wheels are unsuffixed nvidia-cublas / nvidia-cuda-runtime. cosmos-
-#    framework declares `vllm` and `cu130` as conflicting groups, so this native image selects
-#    cu130 (the vLLM E-ladder needs a separate --group vllm image). Then bump cuDNN >= 9.22 for the
-#    fused-attention backend (the cu130 group pins 9.15.1, which is too old; cuDNN kept -cu13).
+# 2) Model venv for the NATIVE-PyTorch path (§5.3.1): the `cu130` group provides torch
+#    2.10.0+cu130 AND pins nvidia-cublas==13.1.0.3 — a pin that is BROKEN on Hopper/Blackwell +
+#    r580 drivers (trivial GEMM -> CUBLAS_STATUS_INVALID_VALUE; vllm#35028). Override it with
+#    13.1.1.3, the patched pin torch 2.13+cu130 ships. NOTE the names: PyPI's nvidia-cublas-cu13 /
+#    nvidia-cuda-runtime-cu13 are dead 0.0.1 stubs; the real CUDA-13 wheels are unsuffixed
+#    nvidia-cublas / nvidia-cuda-runtime. cosmos-framework declares `vllm` and `cu130` as
+#    conflicting groups, so this native image selects cu130 (the vLLM E-ladder needs a separate
+#    --group vllm image). Then bump cuDNN >= 9.22 for the fused-attention backend (the cu130 group
+#    pins 9.15.1, which is too old; cuDNN kept -cu13).
 RUN cd /opt/cosmos-framework \
     && uv sync --all-extras --group cu130 --group policy-server \
     && uv pip install "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96" \
