@@ -99,8 +99,11 @@ def _build_service(checkpoint: str, config: Config, gen):
                 "checkpoint_path": args.checkpoint_path,
                 "output_dir": args.output_dir or _DEFAULT_ROBOLAB_OUTPUT_DIR,
                 "sampler": args.sampler,
-                "use_torch_compile": compile_,      # §5.3.1 torch.compile (R2/G2/E2)   VERIFY field
-                "use_cuda_graphs": graphs,          # §5.3.1 CUDA graphs (R3/G3/E3)     VERIFY field
+                # Skip the gated nvidia/Cosmos-Guardrail1 download — the safety guardrail is a
+                # content filter, not part of action-policy latency (§3 excludes it).
+                "guardrails": False,
+                "use_torch_compile": compile_,      # §5.3.1 torch.compile (cosmos default is True!)
+                "use_cuda_graphs": graphs,          # §5.3.1 CUDA-graph replay
             }
             setup = OmniSetupOverrides.model_validate(overrides).build_setup()
             return disable_runtime_ema_for_frozen_config(setup)
