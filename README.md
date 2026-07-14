@@ -98,9 +98,10 @@ and p50/p90/p99 summaries. One JSONL row per request (§7) plus `summary.json`,
 configuration's engine flags and measures wall-clock from the server's per-stage timers.
 
 ```bash
-bash deploy/setup_gpu.sh          # deps + weights access + stage the replay set (one-time)
+bash deploy/setup.sh                                        # deps + weights (one-time); prints run cmds
+uv run python -m policy.capture --n 50 --out /local/replay  # capture the real DROID replay set
 uv run python run_matrix.py --input-manifest /local/replay/manifest.json \
-    --output-dir results --backend vllm
+    --output-dir results --backend pytorch                 # routes R/G->pytorch, E/G4/G5->vLLM-Omni
 uv run python aggregate.py --out-dir results
 ```
 

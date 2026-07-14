@@ -6,7 +6,7 @@
 #
 #   ./jobs/with-env.sh npa workbench cosmos deploy --runtime serverless ...
 #   ./jobs/with-env.sh sky jobs launch jobs/job1-ablation-matrix.sky.yaml
-#   ./jobs/with-env.sh bash deploy/setup_gpu.sh
+#   ./jobs/with-env.sh bash deploy/setup.sh
 #
 # Override the file with ENV_FILE=/path/to/other.env ./jobs/with-env.sh ...
 set -euo pipefail

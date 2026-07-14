@@ -29,7 +29,7 @@ SkyPilot) pick them up automatically:
 cp .env.example .env                # secrets + Nebius context only (HF_TOKEN, AWS keys, PROJECT_ID/ALIAS/TENANT, …)
 ./jobs/with-env.sh npa workbench cosmos deploy --runtime serverless ...   # npa reads os.environ
 ./jobs/with-env.sh sky jobs launch jobs/job1-ablation-matrix.sky.yaml     # or: sky ... --env-file .env
-./jobs/with-env.sh bash deploy/setup_gpu.sh
+./jobs/with-env.sh bash deploy/setup.sh
 ```
 
 `.env` is gitignored; `.env.example` is the tracked template. (npa's other route — `npa
