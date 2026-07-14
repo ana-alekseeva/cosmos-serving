@@ -54,7 +54,7 @@ run: |
   set -euo pipefail
   export PATH="$HOME/.local/bin:$PATH"
   : "${HF_TOKEN:?HF_TOKEN required — pass with: sky jobs launch --secret HF_TOKEN ...}"
-  huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential || true
+  hf auth login --token "${HF_TOKEN}" --add-to-git-credential || true
   cd cosmos-serving
   nvidia-smi
 
@@ -72,7 +72,7 @@ run: |
   # Stage the model checkpoint locally for the native PyTorch path (pytorch loads from
   # --checkpoint-dir; the routed vLLM/vLLM-Omni configs pull from HF by id). VERIFY layout.
   MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml | head -1)"
-  [ "${BACKEND}" = "pytorch" ] && huggingface-cli download "${MODEL}" --local-dir /local/model
+  [ "${BACKEND}" = "pytorch" ] && hf download "${MODEL}" --local-dir /local/model
 
   # 1) Single-GPU waterfall, each config on its serving backend (policy/compat.resolve_backend):
   #    R0-R4 + G0-G3 on the native PyTorch reference (§5.3.1); the end-to-end ladder E0-E6 and the

@@ -43,7 +43,7 @@ run: |
   set -euo pipefail
   export PATH="$HOME/.local/bin:$PATH"
   : "${HF_TOKEN:?HF_TOKEN required}"
-  huggingface-cli login --token "${HF_TOKEN}" --add-to-git-credential || true
+  hf auth login --token "${HF_TOKEN}" --add-to-git-credential || true
   cd cosmos-serving && nvidia-smi
   # Same real replay set as Job 1 (§8): capture is deterministic, so the 50 DROID observations
   # are identical here. Production is always real (--backend vllm below).

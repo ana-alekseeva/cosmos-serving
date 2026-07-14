@@ -10,6 +10,13 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+# 0. Fast local scratch: model weights + the replay set stage under /local — the path every
+#    job YAML and config default expects. On SkyPilot boxes /local is a pre-mounted NVMe; on a
+#    hand-provisioned box it isn't, so create it once and hand it to the current user.
+if [ ! -w /local ]; then
+  sudo mkdir -p /local && sudo chown "$(id -un):$(id -gn)" /local
+fi
+
 # 1. Install uv (Python + venv manager) if it isn't already present.
 if ! command -v uv >/dev/null 2>&1; then
   echo "installing uv..."
@@ -31,12 +38,12 @@ if [ ! -f .env ]; then
 fi
 set -a; . ./.env; set +a                             # load HF_TOKEN etc. into this shell
 : "${HF_TOKEN:?HF_TOKEN not set in .env (accept the Cosmos3-Nano-Policy-DROID license on HF first)}"
-huggingface-cli login --token "$HF_TOKEN" --add-to-git-credential || true
+hf auth login --token "$HF_TOKEN" --add-to-git-credential || true
 
 # 4. Model checkpoint for the native-PyTorch path (pytorch loads it from --checkpoint-dir; the
 #    routed vLLM/vLLM-Omni configs pull it from HF by id). MODEL comes from experiment.yaml.
 MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml | head -1)"
-huggingface-cli download "$MODEL" --local-dir /local/model
+hf download "$MODEL" --local-dir /local/model
 
 # 5. vLLM + vLLM-Omni are needed for the routed E / Cache-DiT / FP8 configs (§5.3.3).
 #    Recommended: the all-in-one cosmos3 image. Confirm they import (VERIFY versions):
