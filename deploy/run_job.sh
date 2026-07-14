@@ -16,7 +16,12 @@
 set -euo pipefail
 SERVING=/opt/cosmos-serving; FRAMEWORK=/opt/cosmos-framework
 cd "$SERVING"
-: "${HF_TOKEN:?set HF_TOKEN (nebius --env-secret HF_TOKEN=...)}"
+# Drive the whole job from a single injected .env (mirrors deploy/setup.sh) instead of many
+# --env/--env-secret flags. .env is dockerignored (never baked into the image), so inject it at
+# launch:  nebius ai job create --inject-file .env:/opt/cosmos-serving/.env ...
+# Values in .env are applied to the environment (they win over any --env passed for the same key).
+[ -f "$SERVING/.env" ] && { set -a; . "$SERVING/.env"; set +a; }
+: "${HF_TOKEN:?set HF_TOKEN (inject .env, or pass nebius --env-secret HF_TOKEN=...)}"
 : "${BACKEND:=pytorch}"; : "${MODE:=matrix}"; : "${CONFIGS:=}"
 : "${REPLAY_N:=50}"; : "${REPLAY_SIZE:=50}"; : "${WARMUPS:=5}"; : "${OUTPUT_DIR:=results}"
 mkdir -p /local/replay /local/model
