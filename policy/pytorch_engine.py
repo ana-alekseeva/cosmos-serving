@@ -1,193 +1,126 @@
-"""Native PyTorch reference backend (Cosmos 3 report §5.3.1).
+"""Native PyTorch reference backend (Cosmos 3 report §5.3.1) via cosmos_framework.
 
-This is the *modifiable reference* serving path the report describes: it runs the model and
-the surrounding inference procedure directly in eager-mode PyTorch, mirroring the training
-computation, and is the primary target for landing/validating optimizations BEFORE porting
-them to the production runtimes (vLLM / vLLM-Omni). It is the backend the latency waterfall
-(§4 Job 1) measures; Job 2 re-validates the final config on vLLM-Omni.
+Runs Cosmos3-Nano-Policy-DROID through cosmos_framework.inference.inference.OmniInference — the
+same path `action_policy_server_robolab.py` serves it with. The native inference is ONE call,
+`model.generate_samples_from_batch(batch, guidance, seed, num_steps, shift)`, returning
+`samples["action"]` of shape [T, D] (D=8 joint_pos). It is NOT a decomposed reasoner/denoiser
+API, which has two consequences:
 
-Workflow (§5.3.1), timed per stage with CUDA events:
-  1. Input preparation  — build the modality conditioning dicts + input tensors, host->device.
-  2. Reasoner           — conditioning for the Generator. Invariant across the denoising
-                          trajectory, so with reasoner caching it is computed ONCE/observation
-                          (§5.3.1 Reasoner-tower caching); the naive path recomputes per step.
-  3. Diffusion loop     — flow-matching timestep schedule, per-step denoiser call, classifier-
-                          free guidance (two forward passes combined), sampler update.
-  4. Decode/post-process — latent -> 32x8 action chunk, denormalize/clip, device->host.
+  * The §5.3.1 optimizations map to OmniSetup flags applied at LOAD time — torch.compile ->
+    `use_torch_compile`, CUDA graphs -> `use_cuda_graphs`. We do NOT hand-roll torch.compile /
+    CUDA-graph capture. (No FP8 field in the setup layer — FP8 is vLLM-Omni-only, §5.3.3.)
+  * Per-stage waterfall timing (reasoner vs denoising) is NOT separable from one black-box
+    call. This engine times preprocess / model-compute / postprocess and reports the model
+    compute as a single number; splitting it into reasoner_ms + denoising_ms needs timers
+    INSIDE cosmos_framework (instrument generate_samples_from_batch — a cosmos-side change).
 
-Optimizations implemented here are ONLY the §5.3.1 set (see policy/compat.py):
-  * attention backend    — forced math vs flash SDPA (§9: fail, do not silently fall back).
-  * torch.compile        — regional compilation of the repeated transformer blocks
-                           ("transformer-layer granularity", §5.3.1); the Python serving loop
-                           stays eager.
-  * CUDA-graph replay     — torch.compile(mode="reduce-overhead") on those blocks.
-  * Reasoner-tower caching — compute conditioning once/observation, reuse across steps.
+FP8 + Cache-DiT are vLLM-Omni features (§5.3.3); those configs route to the vllm backend
+(policy/compat.resolve_backend), never here.
 
-Cache-DiT and FP8 are vLLM-Omni features (§5.3.3) and are REJECTED here by compat.validate —
-the native waterfall stops at the Reasoner cache; those rungs run on vLLM-Omni.
-
-Only the model load + the model's forward signatures are `# VERIFY` hooks (the weights are not
-in this repo); the orchestration, optimization application, and timing are complete.
+Requires cosmos_framework on the box (github.com/NVIDIA/cosmos-framework, the policy-server
+extras). Every cosmos_framework symbol below is a `# VERIFY` against your installed version.
 """
 from __future__ import annotations
 
 import hashlib
-import time
 
 from policy import compat
-from policy.configs import GENERATOR_SAMPLING, N_DENOISE_STEPS, Config
+from policy.configs import ACTION_CHUNK, GENERATOR_SAMPLING, Config
 from policy.dataset import DroidRequest
 from policy.measure import LatencyRecord
 
-_ACTION_CHUNK = (32, 8)          # the only evaluated task (§1)
+_ACTION_T, _ACTION_D = ACTION_CHUNK        # 32 timesteps x 8 DoF (§1)
 
 
-def _load_policy(checkpoint_dir: str, *, device, dtype):
-    """Load the Cosmos3-Nano-Policy-DROID PyTorch model in eval/bf16 on `device`.
+def _make_setup(checkpoint_path: str, *, compile_: bool, cuda_graphs: bool):
+    """Build the cosmos_framework OmniInference setup for this config's §5.3.1 flags.
 
-    VERIFY on-box: the model package + entry point, and the forward interface this engine
-    calls below:
-        policy.reason(obs)            -> conditioning (once/observation, cacheable)
-        policy.reason_null(n)         -> unconditional conditioning for CFG
-        policy.denoiser(x, sigma, c)  -> velocity/noise prediction
-        policy.denoiser.blocks        -> the repeated transformer blocks (compiled per §5.3.1)
-        policy.init_latent(cond)      -> initial noised action latent
-        policy.decode_action(x)       -> (32, 8) action chunk (denormalized)
-    """
-    raise NotImplementedError(
-        f"load Cosmos3-Nano-Policy-DROID from {checkpoint_dir!r} in eager bf16. VERIFY the model "
-        "entry point and the reason()/denoiser()/init_latent()/decode_action() interface used "
-        "by PyTorchPolicyEngine (policy/pytorch_engine.py).")
+    VERIFY the OmniSetupOverrides field names + build_setup() call against your version —
+    action_policy_server_robolab.py builds it via `OmniSetupOverrides.model_validate(...)`
+    then `build_setup(...)`. Attention (flash) is the model default; the reasoner-conditioning
+    cache (R4/E4) maps to a cosmos flag TBD (VERIFY)."""
+    from cosmos_framework.inference.inference import (  # VERIFY import path
+        OmniSetupOverrides,
+        build_setup,
+    )
+    overrides = OmniSetupOverrides.model_validate({
+        "checkpoint_path": checkpoint_path,
+        "use_torch_compile": compile_,       # §5.3.1 torch.compile (R2/G2/E2)
+        "use_cuda_graphs": cuda_graphs,      # §5.3.1 CUDA-graph replay (R3/G3/E3)
+    })
+    return build_setup(overrides)
 
 
 class PyTorchPolicyEngine:
-    """Native eager-PyTorch reference path (§5.3.1). Backend id: 'pytorch'."""
+    """Native eager-PyTorch reference path (§5.3.1) via cosmos_framework. Backend id: 'pytorch'."""
 
     backend = "pytorch"
 
     def __init__(self, config: Config, *, model: str | None = None,
                  checkpoint_dir: str | None = None, **_):
-        compat.validate(config, "pytorch")          # refuse Cache-DiT/FP8 up front (§5.3.3)
+        compat.validate(config, "pytorch")           # refuse Cache-DiT/FP8 (§5.3.3)
         self.config = config
-        self.model = model or "nvidia/Cosmos3-Nano-Policy-DROID"
-        self.checkpoint_dir = checkpoint_dir or "/local/model"
-        self._policy = None
+        # cosmos accepts a local dir or an HF id; prefer the staged checkpoint dir.
+        self.checkpoint = checkpoint_dir or model or "nvidia/Cosmos3-Nano-Policy-DROID"
+        self._model = None
         self._device = None
 
-    # -- lifecycle ----------------------------------------------------------------
     def prepare(self) -> None:
         import torch
-
-        self._device = torch.device("cuda")
-        self._policy = _load_policy(self.checkpoint_dir, device=self._device,
-                                    dtype=torch.bfloat16)
-        self._apply_compile()                        # torch.compile / CUDA graphs (§5.3.1)
-
-    def _sdpa_backend(self):
-        """Forced SDPA backend (§9): flash if requested (fail, don't fall back), else math."""
-        from torch.nn.attention import SDPBackend
-        return (SDPBackend.FLASH_ATTENTION
-                if self.config.stage_flags.get("attention") == "flash"
-                else SDPBackend.MATH)
-
-    def _apply_compile(self) -> None:
-        """Regional compilation of the repeated transformer blocks (§5.3.1).
-
-        reduce-overhead == compile + CUDA-graph replay; default == compile without graphs;
-        neither == eager. The outer serving loop (schedule, CFG, sampler) stays in Python."""
-        import torch
+        from cosmos_framework.inference.inference import OmniInference   # VERIFY import path
 
         flags = self.config.stage_flags
-        if flags.get("cuda_graphs"):
-            mode = "reduce-overhead"                 # compile + CUDA graphs (combined config, §9)
-        elif flags.get("compile"):
-            mode = "default"                         # compile, no graphs
-        else:
-            return                                   # eager baseline
-        blocks = getattr(self._policy.denoiser, "blocks", None)   # VERIFY attribute name
-        if blocks is None:                           # fall back to whole-denoiser compile
-            self._policy.denoiser = torch.compile(self._policy.denoiser, mode=mode, fullgraph=True)
-        else:
-            for i in range(len(blocks)):             # compile each repeated block (regional)
-                blocks[i] = torch.compile(blocks[i], mode=mode, fullgraph=True)
+        setup = _make_setup(
+            self.checkpoint,
+            compile_=bool(flags.get("compile") or flags.get("cuda_graphs")),  # graphs imply compile
+            cuda_graphs=bool(flags.get("cuda_graphs")),
+        )
+        self._model = OmniInference.create(setup).model   # loads the 16B MoT policy
+        self._device = torch.device("cuda")
 
-    def close(self) -> None:
-        self._policy = None
-
-    # -- one request (§5.3.1 workflow, CUDA-event timed) --------------------------
     def run_request(self, req: DroidRequest) -> LatencyRecord:
         import torch
-        from torch.nn.attention import sdpa_kernel
 
-        dev = self._device
-        cached = self.config.reasoner_cached
         gen = GENERATOR_SAMPLING
+        dev = self._device
         torch.cuda.reset_peak_memory_stats(dev)
 
-        def _evpair():
+        def _ev():
             return torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
-        pre, rea, prep, post, d2h = _evpair(), _evpair(), _evpair(), _evpair(), _evpair()
-        step_evs = [_evpair() for _ in range(N_DENOISE_STEPS)]
-
-        with torch.inference_mode(), sdpa_kernel(self._sdpa_backend()):
-            # 1. Input preparation (host tensors -> device). VERIFY the conditioning builder.
+        pre, comp, post = _ev(), _ev(), _ev()
+        with torch.inference_mode():
             pre[0].record()
-            obs = self._prepare_inputs(req, dev)
+            batch = self._build_batch(req)               # ai_caption + video + proprio + domain_id
             pre[1].record()
 
-            # 2. Reasoner conditioning — once if cached, else recomputed per denoising step.
-            rea[0].record()
-            cond = uncond = None
-            if cached:
-                cond, uncond = self._reason(obs)     # invariant across the trajectory (§5.3.1)
-            rea[1].record()
+            comp[0].record()
+            samples = self._model.generate_samples_from_batch(   # reasoner + diffusion + decode
+                batch, guidance=gen.guidance, seed=[req.seed],
+                num_steps=gen.steps, shift=gen.shift)            # VERIFY kwarg names
+            comp[1].record()
 
-            # 3. Generator preparation — schedule + initial latent.
-            prep[0].record()
-            sigmas = self._sigmas(gen.steps, gen.shift, dev)
-            x = self._policy.init_latent(cond if cached else obs)   # VERIFY
-            prep[1].record()
-
-            # 4. Diffusion loop — per-step denoiser + CFG + sampler update.
-            reasoner_extra = 0.0                     # per-step reasoner cost when NOT cached
-            for i in range(gen.steps):
-                if not cached:                       # naive path recomputes conditioning/step
-                    r0, r1 = _evpair()
-                    r0.record(); cond, uncond = self._reason(obs); r1.record()
-                    step_evs[i] = (step_evs[i][0], step_evs[i][1], r0, r1)  # carry reasoner evs
-                step_evs[i][0].record()
-                x = self._denoise_step(x, sigmas[i], sigmas[i + 1], cond, uncond, gen.guidance)
-                step_evs[i][1].record()
-
-            # 5. Decode + post-process, then device -> host.
             post[0].record()
-            action = self._policy.decode_action(x)   # (32, 8) VERIFY
+            action = samples["action"][0][:_ACTION_T, :_ACTION_D]   # [32, 8]  VERIFY history trim
+            action_cpu = action.detach().to("cpu")
             post[1].record()
-            d2h[0].record()
-            action_cpu = action.detach().to("cpu", non_blocking=False)
-            d2h[1].record()
 
-        torch.cuda.synchronize(dev)                  # single sync, then read all timers (§6)
-
-        denoise_steps = [a.elapsed_time(b) for (a, b, *_) in step_evs]
-        reasoner_ms = rea[0].elapsed_time(rea[1])
-        if not cached:                               # add the per-step recomputation cost
-            reasoner_ms += sum(r0.elapsed_time(r1) for (*_, r0, r1) in step_evs)
+        torch.cuda.synchronize(dev)
         preprocess_ms = pre[0].elapsed_time(pre[1])
-        gen_prep_ms = prep[0].elapsed_time(prep[1])
+        compute_ms = comp[0].elapsed_time(comp[1])       # reasoner+denoise combined (single call)
         postprocess_ms = post[0].elapsed_time(post[1])
-        d2h_ms = d2h[0].elapsed_time(d2h[1])
-        denoising_ms = sum(denoise_steps)
-        server_ms = (preprocess_ms + reasoner_ms + gen_prep_ms + denoising_ms
-                     + postprocess_ms + d2h_ms)
+        server_ms = preprocess_ms + compute_ms + postprocess_ms
         peak_mb = torch.cuda.max_memory_allocated(dev) / (1024 * 1024)
 
         return LatencyRecord(
             request_id=req.request_id, task=req.task, episode_id=req.episode_id,
-            preprocess_ms=preprocess_ms, h2d_ms=0.0, reasoner_ms=reasoner_ms,
-            generator_prepare_ms=gen_prep_ms, denoising_ms=denoising_ms,
-            denoising_step_ms=denoise_steps, postprocess_ms=postprocess_ms, d2h_ms=d2h_ms,
+            preprocess_ms=preprocess_ms, h2d_ms=0.0,
+            # Single-call model: reasoner/denoise are not separable here. The whole model compute
+            # is reported as denoising_ms; reasoner_ms / generator_prepare_ms need cosmos_framework
+            # instrumentation (timers inside generate_samples_from_batch) for the §3 stage split.
+            reasoner_ms=0.0, generator_prepare_ms=0.0,
+            denoising_ms=compute_ms, denoising_step_ms=[],
+            postprocess_ms=postprocess_ms, d2h_ms=0.0,
             server_ms=server_ms, transport_ms=0.0,       # in-process: no client/server transport
             first_action_ms=server_ms, total_chunk_ms=server_ms,
             peak_memory_mb=peak_mb,
@@ -195,41 +128,31 @@ class PyTorchPolicyEngine:
             quality_gate="n/a",                          # pytorch runs only lossless configs
         )
 
-    # -- model hooks (VERIFY the real signatures on-box) --------------------------
-    def _prepare_inputs(self, req: DroidRequest, dev):
-        """Build the conditioning dict + input tensors from the captured observation.
+    def _build_batch(self, req: DroidRequest):
+        """Build the cosmos_framework data_batch from the real DROID capture.
 
-        VERIFY: load the real DROID tensors (policy.capture.load_capture on req.capture_ref),
-        normalize, and assemble the model's modality conditioning dict on `dev`."""
+        Mirror RobolabPolicyService._build_sample (action_policy_server_robolab.py): a dict with
+          "ai_caption": the language instruction,
+          "video":      image tensor [3, T, H, W] (DROID exterior view, resized to the model's
+                        480p 640x360),
+          "action":     a placeholder chunk,
+          "domain_id":  the DROID domain id,
+        plus the proprioceptive joint-position state. VERIFY the exact keys / resolution / dtype."""
         from policy.capture import load_capture
-        obs = load_capture(req.capture_ref)          # exterior/wrist/proprio/instruction
-        return self._policy.build_conditioning(obs, device=dev, seed=req.seed)   # VERIFY
+        obs = load_capture(req.capture_ref)              # exterior/wrist/proprio/instruction
+        raise NotImplementedError(
+            "build the cosmos_framework data_batch from the DROID capture — mirror "
+            "RobolabPolicyService._build_sample in action_policy_server_robolab.py "
+            "(ai_caption=instruction, video=[3,T,H,W] @480p 640x360, proprio joint_pos, domain_id). "
+            f"capture has keys {sorted(obs)}.")
 
-    def _reason(self, obs):
-        """Reasoner conditioning for CFG: (conditional, unconditional). VERIFY signatures."""
-        return self._policy.reason(obs), self._policy.reason_null(obs)
-
-    def _denoise_step(self, x, sigma, sigma_next, cond, uncond, guidance):
-        """One flow-matching Euler step with classifier-free guidance (full-range null, §1).
-
-        CFG needs two forwards — conditional + unconditional — combined per step (§5.3.1
-        Diffusion loop). VERIFY the denoiser signature and the sampler update convention."""
-        v_cond = self._policy.denoiser(x, sigma, cond)
-        v_uncond = self._policy.denoiser(x, sigma, uncond)
-        v = v_uncond + guidance * (v_cond - v_uncond)        # full-range CFG null
-        return x + (sigma_next - sigma) * v                  # Euler update; VERIFY convention
-
-    @staticmethod
-    def _sigmas(steps: int, shift: float, dev):
-        """Flow-matching timestep schedule with shift (Cosmos/SD3-style). VERIFY the exact recipe."""
-        import torch
-        t = torch.linspace(1.0, 0.0, steps + 1, device=dev)
-        return shift * t / (1.0 + (shift - 1.0) * t)
+    def close(self) -> None:
+        self._model = None
 
 
 def _action_checksum(action) -> str:
     """Checksum of the (32,8) action chunk, rounded to tolerate compile/kernel FP noise so
-    lossless rungs (flash/compile/graphs/reasoner-cache) match the eager baseline (§10)."""
+    lossless rungs (compile/graphs) match the eager baseline (§10)."""
     import numpy as np
     a = np.round(np.asarray(action, dtype="float64"), 3)
     return hashlib.sha1(a.tobytes()).hexdigest()[:16]
