@@ -112,6 +112,40 @@ installed vLLM / vLLM-Omni (engine flag names, the forced-SDPA Flash backend tha
 rather than silently fall back, static/bucketed shapes for the CUDA-graph configs, and the
 per-stage timing response). The mock stands in for all of this offline.
 
+## Run the ablation jobs on Nebius (`nebius ai job create`)
+
+The jobs run as containers. Build the **native (cu130) image** ([deploy/Dockerfile](deploy/Dockerfile)) —
+it bakes torch-cu130 + `cosmos_framework` + this harness and bumps cuDNN to ≥ 9.22 for the fused-attention
+baseline. cosmos-framework's `vllm` and `cu130` uv groups **conflict**, so this image is the native
+`P0–P3` runtime; the vLLM `E`-ladder + jobs 2/2b need a **separate `--group vllm` image**. All indexes are
+public — no build secret needed.
+
+Push it to a Nebius Container Registry:
+```bash
+PROJECT_ID=<project-id>; REGION=eu-north1
+nebius registry create --name cosmos-droid --parent-id "$PROJECT_ID"    # once; note the registry-… id
+REGISTRY_ID=<registry-id>                                               # nebius registry list --parent-id "$PROJECT_ID"
+nebius iam get-access-token | docker login "cr.${REGION}.nebius.cloud" --username iam --password-stdin
+IMAGE="cr.${REGION}.nebius.cloud/${REGISTRY_ID}/cosmos-droid-bench-native:latest"
+docker build --platform linux/amd64 -f deploy/Dockerfile -t "$IMAGE" . # x86_64 wheels — build on x86 for speed
+docker push "$IMAGE"
+```
+
+Launch a job — [deploy/run_job.sh](deploy/run_job.sh) is the env-driven entrypoint (stages replay + model,
+runs the matrix, aggregates, optional S3 upload). Load secrets from `.env` first so the `$VARS` expand:
+```bash
+set -a && source .env && set +a          # HF_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+nebius ai job create --name cosmos-job1-native --parent-id "$PROJECT_ID" \
+  --image "$IMAGE" --platform gpu-h200-sxm --preset 1gpu-16vcpu-200gb --shm-size 64Gi \
+  --inject-file deploy/run_job.sh:/run_job.sh --container-command bash --args /run_job.sh \
+  --env BACKEND=pytorch --env MODE=matrix --env CONFIGS=P0,P1,P2,P3 \
+  --env REPLAY_SIZE=50 --env WARMUPS=5 --env OUTPUT_DIR=results \
+  --env HF_TOKEN="$HF_TOKEN"
+```
+`--timeout` is a *cap* (default 24h) — you're billed for actual runtime (~1–2 h for Job 1). The other jobs are
+the same shape with different `--preset`/`--env` (and the vLLM image): **1b** `MODE=multigpu` on `2gpu-…`;
+**2** `BACKEND=vllm CONFIGS=E0,E6`; **2b** adds `TENSOR_PARALLEL_SIZE=2 PARALLEL=cfg` on 2 GPUs.
+
 ## Create Nebius resources with the workbench (`npa`)
 
 Provision on Nebius with the **Nebius Physical AI workbench** (`npa`), installed into this
