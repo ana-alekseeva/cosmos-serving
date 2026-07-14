@@ -60,11 +60,15 @@ source "$FRAMEWORK/.venv/bin/activate"
 # config; without it some cuBLAS paths fail to initialize. Cheap + safe — a real candidate fix for
 # the CUBLAS_STATUS_NOT_INITIALIZED at the first GEMM. Set globally for the matrix.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+# Put cuBLASLt's JIT kernel cache on the big /local NVMe, not the container's (possibly full)
+# overlay: a full overlay makes cublasLt fail to write its cache and report NOT_INITIALIZED.
+export CUDA_CACHE_PATH=/local/.nv_cache; mkdir -p "$CUDA_CACHE_PATH"
 
-# Preflight: prove the GPU + cuBLAS work and report FREE memory BEFORE loading the ~30GB model, so a
-# cuBLAS failure is diagnosed (broken node vs OOM vs model) in ~5s instead of ~1min into every config.
+# Preflight: report GPU memory AND disk, and prove cuBLAS works BEFORE loading the ~30GB model, so a
+# cuBLAS failure is diagnosed (broken node vs GPU-OOM vs DISK-full vs model) in ~5s, not 1min/config.
 echo "== PREFLIGHT =="
-CUDA_LAUNCH_BLOCKING=1 python - <<'PY' || { echo "PREFLIGHT FAILED: GPU/cuBLAS is broken on this node — not the harness. Relaunch (new node) or use a different CUDA image."; exit 1; }
+df -h / /tmp /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
+CUDA_LAUNCH_BLOCKING=1 python - <<'PY' || { echo "PREFLIGHT FAILED: GPU/cuBLAS broken on this node (check the df lines above for a full disk). Not the harness."; exit 1; }
 import torch
 print("PREFLIGHT torch", torch.__version__, "cuda", torch.version.cuda, "cudnn", torch.backends.cudnn.version())
 print("PREFLIGHT gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
