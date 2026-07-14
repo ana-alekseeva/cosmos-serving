@@ -1,0 +1,16 @@
+# Keep the Docker build context small + host-agnostic. Everything the image needs is either
+# in the tracked repo source or cloned/installed at build time (see deploy/Dockerfile).
+.git
+.venv
+**/__pycache__
+**/*.pyc
+results*
+.env
+*.env
+!.env.example
+.nebius-physical-ai/          # vendored npa tool — large, not needed in the benchmark image
+workbench/                    # npa provisioning configs (host-side)
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
