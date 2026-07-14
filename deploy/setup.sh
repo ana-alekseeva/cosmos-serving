@@ -31,6 +31,12 @@ uv sync                                              # creates .venv/ with the h
 set +u; source .venv/bin/activate; set -u            # activate .venv for this script
 uv pip install tensorflow-datasets tensorflow-cpu huggingface_hub   # DROID capture (RLDS tfrecords) + HF CLI
 
+# 2b. Real-backend libraries (skipped if already importable — the cosmos3 image has them). The
+#     native PyTorch path (§5.3.1 — R/G configs) needs torch; the routed E / Cache-DiT / FP8
+#     configs need vLLM + vLLM-Omni (§5.3.3, matching major.minor).
+python -c "import torch" 2>/dev/null || uv pip install torch       # native PyTorch backend
+uv pip install cosmos-guardrail                                    # required Generator safety guard
+
 # 3. Secrets from .env (gitignored). Copy .env.example -> .env and fill it in first.
 if [ ! -f .env ]; then
   echo "missing .env — copy .env.example to .env and fill in HF_TOKEN (+ AWS keys for uploads)" >&2
@@ -46,11 +52,11 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 hf download "$MODEL" --local-dir /local/model
 
 # 5. vLLM + vLLM-Omni are needed for the routed E / Cache-DiT / FP8 configs (§5.3.3).
-#    Recommended: the all-in-one cosmos3 image. Confirm they import (VERIFY versions):
 if python -c "import vllm" 2>/dev/null; then
   echo "vllm: importable"
 else
-  echo "WARNING: vllm not importable — install vLLM + vLLM-Omni for the E/G4/G5 configs" >&2
+  echo "NOTE: vLLM/vLLM-Omni not importable — install matching versions for your CUDA (or use the" >&2
+  echo "      vllm/vllm-omni:cosmos3 image):  uv pip install vllm vllm-omni   # VERIFY versions" >&2
 fi
 
 cat <<'NEXT'
