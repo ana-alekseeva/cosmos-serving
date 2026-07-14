@@ -65,7 +65,7 @@ run: |
   if [ "${BACKEND}" = "mock" ]; then
     cp policy/mock/manifest.json /local/replay/manifest.json
   else
-    uv pip install tensorflow-datasets
+    uv pip install tensorflow-datasets tensorflow-cpu
     uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
   fi
 

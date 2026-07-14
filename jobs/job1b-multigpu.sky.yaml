@@ -42,7 +42,7 @@ run: |
   cd cosmos-serving && nvidia-smi
   # Same real replay set as Job 1 (deterministic capture -> identical 50 DROID observations, §8).
   mkdir -p /local/replay
-  uv pip install tensorflow-datasets
+  uv pip install tensorflow-datasets tensorflow-cpu
   uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
 
   # CFG-Parallel + Ulysses Context-Parallel vs best single-GPU (final E6). vLLM-Omni launches

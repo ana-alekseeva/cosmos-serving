@@ -48,7 +48,7 @@ run: |
   # Same real replay set as Job 1 (§8): capture is deterministic, so the 50 DROID observations
   # are identical here. Production is always real (--backend vllm below).
   mkdir -p /local/replay
-  uv pip install tensorflow-datasets
+  uv pip install tensorflow-datasets tensorflow-cpu
   uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
 
   # Production baseline + final ONLY, through the vLLM / vLLM-Omni serving stack.

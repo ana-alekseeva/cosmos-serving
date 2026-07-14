@@ -15,11 +15,12 @@ fixed set is representative. We measure each of the 50 once (replay_size=50) —
 p90, rough p99. Raise replay_size to cycle the set (`dataset.tile_to`) for tighter tails,
 MLPerf single-stream style (a fixed set repeated to the query count).
 
-Runs on a box with `tensorflow-datasets` and DROID access. `droid_100` is a small ~real
-subset (100 episodes / 32k frames / 47 tasks) at gs://gresearch/robotics/droid_100. NOT
-exercised by the mock tests; every DROID field name below is a `# VERIFY` against your build.
+Runs on a box with `tensorflow-datasets` + `tensorflow` and DROID access. droid_100 is a small
+~real subset (100 episodes / 32k frames / 47 tasks) loaded by DIRECTORY from the public bucket
+gs://gresearch/robotics/droid_100/<ver> (NOT a registered tfds name). NOT exercised by the mock
+tests; every DROID field name below is a `# VERIFY` against your build.
 
-    uv pip install tensorflow-datasets
+    uv pip install tensorflow-datasets tensorflow-cpu
     python -m policy.capture --n 50 --out data/replay_real
     # then run the real matrix against it:
     uv run python run_matrix.py --backend vllm --input-manifest data/replay_real/manifest.json
@@ -35,6 +36,9 @@ from policy.dataset import DroidRequest, write_manifest
 
 FIXTURE_SIZE = 50
 STEPS_PER_EPISODE = 3            # spread the N observations across ~N/3 episodes for variety
+# droid_100 is NOT a registered tfds name — it is an Open X-Embodiment RLDS dataset loaded by
+# DIRECTORY from the public GCS bucket (a ~2GB, 100-trajectory sample in the full-droid format).
+DROID_BUILDER_DIR = "gs://gresearch/robotics/droid_100/1.0.0"   # VERIFY the version subdir
 
 # DROID RLDS field names (# VERIFY against your tfds `droid`/`droid_100` build).
 _EXT_KEY = "exterior_image_1_left"   # primary exterior view -> CAMERA_VIEWS[0] "exterior"
@@ -45,7 +49,7 @@ _INSTR_KEY = "language_instruction"  # per-step language instruction
 
 
 def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real", *,
-                  dataset: str = "droid_100", seed: int = CONFIG.dataset.replay_seed) -> Path:
+                  dataset: str = DROID_BUILDER_DIR, seed: int = CONFIG.dataset.replay_seed) -> Path:
     """Pull `n` real DROID observations -> per-obs .npz tensors + a manifest at out_dir.
 
     Deterministic (fixed episode/step stride + seed) so the captured set is reproducible and
@@ -57,14 +61,17 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
         import tensorflow_datasets as tfds
     except ImportError as e:  # pragma: no cover - box-only dependency
         raise SystemExit(
-            "capture needs tensorflow-datasets + DROID access:\n"
-            "  uv pip install tensorflow-datasets\n"
-            "  (droid_100 lives at gs://gresearch/robotics/droid_100)") from e
+            "capture needs tensorflow-datasets + tensorflow (to read the RLDS tfrecords over gs://):\n"
+            "  uv pip install tensorflow-datasets tensorflow-cpu") from e
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(seed)
-    ds = tfds.load(dataset, split="train")          # VERIFY: RLDS episodes with a "steps" field
+    # OXE datasets (droid / droid_100) load by DIRECTORY, not a registered tfds name.
+    if "://" in dataset or "/" in dataset:
+        ds = tfds.builder_from_directory(builder_dir=dataset).as_dataset(split="train")
+    else:
+        ds = tfds.load(dataset, split="train")      # a registered tfds name, if you have one
 
     reqs: list[DroidRequest] = []
     ref_hw: tuple | None = None
@@ -127,7 +134,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Capture a real DROID replay set for latency runs.")
     ap.add_argument("--n", type=int, default=FIXTURE_SIZE, help="unique observations to capture")
     ap.add_argument("--out", type=Path, default=Path("data/replay_real"), help="output dir")
-    ap.add_argument("--dataset", default="droid_100", help="tfds dataset id (droid_100 | droid)")
+    ap.add_argument("--dataset", default=DROID_BUILDER_DIR,
+                    help="RLDS builder dir (gs://gresearch/robotics/droid[_100]/<ver>) or a tfds name")
     ap.add_argument("--seed", type=int, default=CONFIG.dataset.replay_seed)
     args = ap.parse_args()
     capture_droid(args.n, args.out, dataset=args.dataset, seed=args.seed)

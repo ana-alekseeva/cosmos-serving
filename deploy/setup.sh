@@ -29,7 +29,7 @@ uv --version
 uv sync                                              # creates .venv/ with the harness deps
 # shellcheck disable=SC1091
 set +u; source .venv/bin/activate; set -u            # activate .venv for this script
-uv pip install tensorflow-datasets huggingface_hub   # DROID capture + HF CLI
+uv pip install tensorflow-datasets tensorflow-cpu huggingface_hub   # DROID capture (RLDS tfrecords) + HF CLI
 
 # 3. Secrets from .env (gitignored). Copy .env.example -> .env and fill it in first.
 if [ ! -f .env ]; then
