@@ -41,8 +41,24 @@ if [ ! -d "$COSMOS_DIR" ]; then
   git clone https://github.com/NVIDIA/cosmos-framework "$COSMOS_DIR"
 fi
 ( cd "$COSMOS_DIR"
-  uv sync --all-extras --group=policy-server     # torch + cosmos + policy-server deps (VERIFY groups)
-  uv pip install -e "$root"                       # make this harness importable inside cosmos's env
+  unset VIRTUAL_ENV                                # target cosmos-framework/.venv, NOT the active harness venv
+  uv sync --all-extras --group=policy-server      # torch + cosmos + policy-server deps (VERIFY groups)
+  uv pip install -e "$root"                        # make this harness importable inside cosmos's env
+
+  # cuDNN >= 9.22 (§5.3.1): cosmos_framework gates its cuDNN *fused-attention* backend — the R/G
+  # reference baseline — on cuDNN >= 9.22 (torch.backends.cudnn.version()). Below it, EVERY attention
+  # backend is unavailable and R0 dies with "Could not find a compatible Attention backend". torch
+  # loads cuDNN from the nvidia-cudnn wheel, so bump it if the image/stack ships an older one — no
+  # flash_attn build needed (that is why the R/G baseline is cuDNN, not flash2/flash3).
+  cuver="$(uv run python -c 'import torch; print(torch.backends.cudnn.version() or 0)')"
+  if [ "${cuver:-0}" -lt 92200 ]; then
+    cumaj="$(uv run python -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')"
+    echo "cuDNN ${cuver} < 9.22 — upgrading nvidia-cudnn-cu${cumaj} for the cuDNN fused-attention backend..."
+    uv pip install -U "nvidia-cudnn-cu${cumaj}>=9.22"
+    uv run python -c 'import torch; from cosmos_framework.model.attention.cudnn import CUDNN_SUPPORTED as s; print("cuDNN now", torch.backends.cudnn.version(), "supported", s)'
+  else
+    echo "cuDNN ${cuver} >= 9.22 — cuDNN fused-attention backend available"
+  fi
 )
 echo "cosmos-framework env ready: $COSMOS_DIR/.venv  (activate it for --backend pytorch)"
 
