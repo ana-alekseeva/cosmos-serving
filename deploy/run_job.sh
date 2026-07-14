@@ -35,49 +35,34 @@ mkdir -p /local/replay /local/model
 
 MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml | head -1)"
 
-# --- stage the replay set in the HARNESS venv (has tfds) ---
-# shellcheck disable=SC1091
-source "$SERVING/.venv/bin/activate"
-command -v hf >/dev/null 2>&1 || uv pip install -q huggingface_hub
-hf auth login --token "$HF_TOKEN" --add-to-git-credential || true
-python -m policy.capture --n "$REPLAY_N" --out /local/replay
-
-# model weights for the native-PyTorch path (vLLM pulls by id, so only when BACKEND=pytorch)
-[ "$BACKEND" = pytorch ] && hf download "$MODEL" --local-dir /local/model
-
-# --- run in the MODEL venv (torch + cosmos_framework + policy) ---
+# --- CUDA sanity FIRST: a broken node/cuBLAS should fail here in ~1 min, BEFORE the replay
+# capture and the 30GB model download. ---
 # torch 2.10.0+cu130 must load its OWN pip CUDA wheels, but cosmos-framework's lock leaves
 # cuBLAS/cuda-runtime out (it expects the box's system CUDA), so torch falls back to this
-# nvidia/cuda:13.0.0-devel image's OLDER system cuBLAS (13.0 vs the 13.1 torch was built against)
-# and every GEMM fails with CUBLAS_STATUS_INVALID_VALUE. Do NOT `uv sync` here: the image is already
-# synced to that same lock, so a runtime sync only PRUNES the fixes (these wheels, the cuDNN>=9.22
-# bump, the baked editable cosmos-serving). Install exactly what torch 2.10.0+cu130 declares.
+# nvidia/cuda:13.0.0-devel image's OLDER system cuBLAS (13.0 vs the 13.1 torch was built against).
+# Do NOT `uv sync` here: the image is already synced to that same lock, so a runtime sync only
+# PRUNES the fixes (these wheels, the cuDNN>=9.22 bump, the baked editable cosmos-serving).
 # Names: PyPI renamed the CUDA-13 libs — nvidia-cublas-cu13 / nvidia-cuda-runtime-cu13 are dead
-# 0.0.1 stubs that fail at build; the real wheels are UNSUFFIXED nvidia-cublas / nvidia-cuda-runtime
-# (13.x). Only cuDNN kept the -cu13 suffix.
-# NB: the harness venv is still active, and `uv pip install` targets $VIRTUAL_ENV — pin --python
-# or the libs land in the wrong venv.
-uv pip install -qU --python "$FRAMEWORK/.venv/bin/python" \
-    "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.0.3" "nvidia-cuda-runtime==13.0.96"
-# shellcheck disable=SC1091
-source "$FRAMEWORK/.venv/bin/activate"
+# 0.0.1 stubs; the real wheels are UNSUFFIXED nvidia-cublas / nvidia-cuda-runtime. cuDNN kept -cu13.
+# Versions: torch 2.10's own pin nvidia-cublas==13.1.0.3 is BROKEN on Hopper/Blackwell + r580
+# drivers — trivial GEMMs fail with CUBLAS_STATUS_INVALID_VALUE (pytorch#174949 is the cu12 twin,
+# vllm#35028 is this exact cu130 stack). 13.1.1.3 is the patched pin torch 2.13+cu130 ships.
+# If that still fails, the preflight escalates to the newest cuBLAS via LD_PRELOAD before giving up.
+# NB: `uv pip install` targets the active $VIRTUAL_ENV — pin --python or libs land in the wrong venv.
+PYMODEL="$FRAMEWORK/.venv/bin/python"
+uv pip install -qU --python "$PYMODEL" \
+    "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
 
 # Deterministic cuBLAS (the policy server runs with deterministic_seed=True) needs a workspace
-# config; without it some cuBLAS paths fail to initialize. Cheap + safe — a real candidate fix for
-# the CUBLAS_STATUS_NOT_INITIALIZED at the first GEMM. Set globally for the matrix.
+# config; without it some cuBLAS paths fail to initialize. Set globally, preflight probes WITH it
+# so the probe env == the matrix env.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # Put cuBLASLt's JIT kernel cache on the big /local NVMe, not the container's (possibly full)
 # overlay: a full overlay makes cublasLt fail to write its cache and report NOT_INITIALIZED.
 export CUDA_CACHE_PATH=/local/.nv_cache; mkdir -p "$CUDA_CACHE_PATH"
 
-# Preflight: disk/mem are fine but a TRIVIAL matmul fails with a cuBLAS error, so this is a
-# CUDA-13/driver/cuBLAS-library mismatch on the node, not the harness. Capture the driver + nvidia-*
-# wheel versions and a per-dtype GEMM result so we know WHICH mismatch (too-old driver vs bad wheel).
-echo "== PREFLIGHT =="
-df -h / /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
-nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/PREFLIGHT smi /'
-rc=0; env -u CUBLAS_WORKSPACE_CONFIG python - <<'PY' || rc=$?
-import torch, sys
+cat > /tmp/gemm_probe.py <<'PY'
+import sys, torch
 from importlib.metadata import version, PackageNotFoundError
 def v(p):
     try: return version(p)
@@ -93,13 +78,86 @@ for dt in ("float32", "float16", "bfloat16"):
         print(f"PREFLIGHT GEMM {dt}: OK")
     except Exception as e:
         ok = False; print(f"PREFLIGHT GEMM {dt}: FAIL {type(e).__name__}: {str(e)[:110]}")
+# the .so that actually got mapped (wheel vs /usr/local/cuda system copy) — metadata can't tell us
+libs = sorted({ln.split()[-1] for ln in open("/proc/self/maps") if "cublas" in ln})
+print("PREFLIGHT loaded_cublas", *(libs or ["none"]))
 sys.exit(0 if ok else 2)
 PY
+
+# Raw cuBLAS SGEMM via ctypes — bypasses torch's handle/workspace management entirely, so it
+# separates "this cuBLAS build is broken on this node" from "torch's cuBLAS setup is broken".
+# argv[1] = dir containing libcublas.so.13 ("" = let ld.so pick the system copy).
+cat > /tmp/raw_cublas.py <<'PY'
+import ctypes, sys
+libdir = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
+tag = libdir or "ld.so default"
+cudart = ctypes.CDLL("libcudart.so.13", mode=ctypes.RTLD_GLOBAL)
+if libdir:
+    ctypes.CDLL(f"{libdir}/libcublasLt.so.13", mode=ctypes.RTLD_GLOBAL)
+    cublas = ctypes.CDLL(f"{libdir}/libcublas.so.13", mode=ctypes.RTLD_GLOBAL)
+else:
+    cublas = ctypes.CDLL("libcublas.so.13", mode=ctypes.RTLD_GLOBAL)
+h = ctypes.c_void_p()
+st = cublas.cublasCreate_v2(ctypes.byref(h))
+if st != 0:
+    print(f"RAW [{tag}] cublasCreate={st} (0=OK)"); sys.exit(3)
+ver = ctypes.c_int(); cublas.cublasGetVersion_v2(h, ctypes.byref(ver))
+n = 512; bufs = []
+for _ in range(3):
+    p = ctypes.c_void_p()
+    if cudart.cudaMalloc(ctypes.byref(p), n * n * 4) != 0:
+        print(f"RAW [{tag}] cudaMalloc FAILED"); sys.exit(4)
+    bufs.append(p)
+one, zero = ctypes.c_float(1.0), ctypes.c_float(0.0)
+st = cublas.cublasSgemm_v2(h, 0, 0, n, n, n, ctypes.byref(one), bufs[0], n, bufs[1], n,
+                           ctypes.byref(zero), bufs[2], n)
+sync = cudart.cudaDeviceSynchronize()
+print(f"RAW [{tag}] cublas_version={ver.value} sgemm={st} sync={sync} (0=OK)")
+sys.exit(0 if st == 0 and sync == 0 else 3)
+PY
+
+echo "== PREFLIGHT =="
+df -h / /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/PREFLIGHT smi /'
+rc=0; "$PYMODEL" /tmp/gemm_probe.py || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "PREFLIGHT: GEMM failed with torch's patched cuBLAS pin -> escalating to newest nvidia-cublas via LD_PRELOAD"
+  uv pip install -q --python "$PYMODEL" --target /local/cublas-alt "nvidia-cublas==${CUBLAS_ALT:-13.6.0.2}"
+  ALT=/local/cublas-alt/nvidia/cu13/lib
+  if LD_PRELOAD="$ALT/libcublasLt.so.13:$ALT/libcublas.so.13" "$PYMODEL" /tmp/gemm_probe.py; then
+    export LD_PRELOAD="$ALT/libcublasLt.so.13:$ALT/libcublas.so.13"
+    echo "PREFLIGHT: GEMM OK with newest cuBLAS preloaded -> matrix will run with it"
+    rc=0
+  else
+    echo "PREFLIGHT: GEMM fails with BOTH the pinned and the newest cuBLAS. Raw-cuBLAS isolation:"
+    SP="$("$PYMODEL" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+    "$PYMODEL" /tmp/raw_cublas.py "$SP/nvidia/cu13/lib" || true
+    "$PYMODEL" /tmp/raw_cublas.py "$ALT" || true
+    "$PYMODEL" /tmp/raw_cublas.py "" || true
+  fi
+fi
 echo "== END PREFLIGHT =="
 if [ "$rc" -ne 0 ]; then
-  echo "PREFLIGHT: basic GEMM failed on this node -> CUDA-13/driver/cuBLAS mismatch (versions above), NOT the harness. Aborting before the 30GB model load."
+  echo "PREFLIGHT: trivial GEMM fails with every cuBLAS build. RAW lines above tell you which:"
+  echo "PREFLIGHT:   raw sgemm=0 but torch FAIL -> torch-side (report with these numbers)"
+  echo "PREFLIGHT:   raw sgemm!=0 too          -> node/driver problem -> retry on another node / report to Nebius"
+  echo "PREFLIGHT: aborting before the 30GB model load."
   exit 1
 fi
+
+# --- stage the replay set in the HARNESS venv (has tfds) ---
+# shellcheck disable=SC1091
+source "$SERVING/.venv/bin/activate"
+command -v hf >/dev/null 2>&1 || uv pip install -q huggingface_hub
+hf auth login --token "$HF_TOKEN" --add-to-git-credential || true
+python -m policy.capture --n "$REPLAY_N" --out /local/replay
+
+# model weights for the native-PyTorch path (vLLM pulls by id, so only when BACKEND=pytorch)
+[ "$BACKEND" = pytorch ] && hf download "$MODEL" --local-dir /local/model
+
+# --- run the matrix in the MODEL venv (torch + cosmos_framework + policy) ---
+# shellcheck disable=SC1091
+source "$FRAMEWORK/.venv/bin/activate"
 
 cfg=(); [ -n "$CONFIGS" ] && cfg=(--configurations "$CONFIGS")
 if [ "$MODE" = multigpu ]; then

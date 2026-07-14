@@ -68,7 +68,7 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 #    fused-attention backend (the cu130 group pins 9.15.1, which is too old; cuDNN kept -cu13).
 RUN cd /opt/cosmos-framework \
     && uv sync --all-extras --group cu130 --group policy-server \
-    && uv pip install "nvidia-cublas==13.1.0.3" "nvidia-cuda-runtime==13.0.96" \
+    && uv pip install "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96" \
     && uv pip install -e /opt/cosmos-serving \
     && cuver="$(uv run python -c 'import torch; print(torch.backends.cudnn.version() or 0)')" \
     && cumaj="$(uv run python -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')" \
