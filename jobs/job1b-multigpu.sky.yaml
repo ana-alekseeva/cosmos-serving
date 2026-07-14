@@ -49,6 +49,10 @@ run: |
   # with --tensor-parallel-size 2 for the parallel strategies (VERIFY flags in policy/serving.py).
   uv run python run_multigpu.py --backend vllm --manifest /local/replay/manifest.json --out-dir results
 
+  # torch.profiler Chrome traces (Perfetto dashboard) -> ${OUTPUT_URI}raw/traces/. Self-guards:
+  # skips unless the native-PyTorch stack (cosmos_framework + checkpoint) is present.
+  bash deploy/profile_and_upload.sh /local/replay/manifest.json || true
+
   if command -v aws >/dev/null 2>&1; then
     aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
     aws s3 cp results/aggregate/multigpu.json "${OUTPUT_URI}" --endpoint-url "${AWS_ENDPOINT_URL}"

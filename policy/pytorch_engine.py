@@ -151,7 +151,14 @@ class PyTorchPolicyEngine:
         self._model = self._svc.model
         self._device = torch.device("cuda")
         # Stage hooks: reasoner tower + diffusion denoiser (VERIFY the submodule names).
+        # SKIP them under CUDA-graph replay (reduce-overhead): the per-forward CUDA-event records
+        # are "non-GPU ops" that force cudagraph *partitioning* (the framework logs exactly that),
+        # fragmenting the captured loop so replay can't remove launch overhead — which is why CUDA
+        # graphs otherwise appear not to help. The reasoner/denoiser split is opaque under replay
+        # anyway, so graph configs are timed end-to-end only (server_ms / total_chunk_ms are exact).
         self._hooks = _StageHooks()
+        if self.config.stage_flags.get("cuda_graphs"):
+            return
         reasoner = _find(self._model, _REASONER_CANDIDATES)
         denoiser = _find(self._model, _DENOISER_CANDIDATES)
         if reasoner is not None:

@@ -28,7 +28,7 @@ import random
 import zlib
 
 from policy.config import CONFIG
-from policy.configs import GENERATOR, N_DENOISE_STEPS, Config
+from policy.configs import N_DENOISE_STEPS, Config
 from policy.dataset import DroidRequest
 from policy.measure import LatencyRecord
 
@@ -57,9 +57,9 @@ QUALITY_GATE_THRESHOLD = CONFIG.quality_gate.action_mse_threshold
 
 
 def _reasoner_ms(config: Config, single_eff: float) -> float:
-    """Effective reasoner conditioning time. Recomputed per step unless cached; the
-    generator waterfall always holds the reasoner at its cached single-conditioning cost."""
-    cached = config.reasoner_cached or config.waterfall == GENERATOR
+    """Effective reasoner conditioning time. Recomputed per step unless the reasoner-conditioning
+    cache is on (P3 / E4), which holds it at the single-conditioning cost."""
+    cached = config.reasoner_cached
     if cached:
         return single_eff
     f = REASONER_RECOMPUTE_FRACTION

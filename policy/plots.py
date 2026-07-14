@@ -67,8 +67,7 @@ def plot_waterfall(data: dict, out_path: str | Path, title: str | None = None) -
                     (len(rungs) - 1, p50[-1]), textcoords="offset points", xytext=(0, 24),
                     ha="center", fontsize=9, color=COLOR_BAR, fontweight="bold")
 
-    name = {"reasoner": "Reasoner conditioning (R0→R3)",
-            "generator": "Generator (G0→G4)",
+    name = {"native": "Native PyTorch (P0→P3)",
             "end_to_end": "End-to-end cumulative (E0→E6)"}.get(data["waterfall"], data["waterfall"])
     ax.set_title(title or f"Cosmos3-Nano-Policy-DROID — {name} latency waterfall", fontsize=12)
     ax.set_ylabel(data["metric_label"])

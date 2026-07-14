@@ -2,11 +2,10 @@
 
 Three waterfalls, all single-GPU, batch size 1:
 
-  Reasoner conditioning waterfall  R0 -> R3   (measures `reasoner_ms`)
-  Generator waterfall              G0 -> G4   (measures `generator_prepare_ms` + `denoising_ms`)
-  End-to-end cumulative waterfall  E0 -> E6   (measures `total_chunk_ms`)
+  Native-PyTorch reference waterfall  P0 -> P3   (measures `total_chunk_ms`; R+G merged — one MoT)
+  End-to-end cumulative waterfall     E0 -> E6   (measures `total_chunk_ms`, vLLM stack)
 
-Attention baseline: the native-PyTorch reference path (R/G) runs on cosmos_framework, whose
+Attention baseline: the native-PyTorch reference path (P) runs on cosmos_framework, whose
 attention dispatcher has NO math/SDPA backend — only fused kernels (flash2/flash3/cuDNN/NATTEN).
 So the R/G baseline is torch-native cuDNN *fused* attention (flash-class), forced via
 I4_ATTN_BACKENDS=cudnn (policy/pytorch_engine.py); there is no separate math baseline or "+Flash"
@@ -41,10 +40,13 @@ from policy.config import (  # single source of truth (experiment.yaml)
 # ---------------------------------------------------------------------------
 # Pipeline stages (specification_revised.txt §3 stage breakdown / §6 fields).
 # ---------------------------------------------------------------------------
-REASONER = "reasoner"
-GENERATOR = "generator"
+# Two waterfalls. The old reasoner (R) and generator (G) ladders both measured the SAME single
+# MoT inference (Cosmos3VFMNetwork — one net forward), so on-box they produced identical numbers;
+# they are merged into ONE native-PyTorch reference ladder P (§5.3.1). E is the end-to-end vLLM
+# ladder (§5.3.2/§5.3.3).
+NATIVE = "native"
 END_TO_END = "end_to_end"
-WATERFALLS = (REASONER, GENERATOR, END_TO_END)
+WATERFALLS = (NATIVE, END_TO_END)
 
 # The six wall-clock stages the spec's stage breakdown reconciles to.
 STAGES = (
@@ -73,8 +75,8 @@ N_DENOISE_STEPS = GENERATOR_SAMPLING.steps
 @dataclass(frozen=True)
 class Config:
     """One rung of a waterfall = one cumulative optimization configuration."""
-    cid: str                       # "R0" ... "G4" ... "E6"
-    waterfall: str                 # REASONER | GENERATOR | END_TO_END
+    cid: str                       # "P0" ... "P3" ... "E6"
+    waterfall: str                 # NATIVE | END_TO_END
     label: str                     # human label for tables/plots
     index: int                     # position on its ladder (0 = baseline)
     added: str                     # the single technique this rung adds ("" for baseline)
@@ -91,19 +93,19 @@ class Config:
 #
 # Anchors:
 #   - Flash/fused attention (E-ladder / vLLM only): attention-bound stages shrink (reasoner
-#     ~1.30, denoise ~1.25). The R/G reference path is already cuDNN-fused, so it has no such rung.
+#     ~1.30, denoise ~1.25). The P reference path is already cuDNN-fused, so it has no such rung.
 #   - torch.compile: kernel fusion + less host overhead (~1.12-1.15).
 #   - CUDA graph replay: removes per-launch overhead; big when the loop is many small
 #     kernels (denoise ~1.15), modest on the VLM prefill (~1.10). Not double-counted with
 #     compile — measured as the *additional* drop over compile (§9).
-#   - Reasoner conditioning cache (R3 / E4): conditioning is invariant across the denoising
+#   - Reasoner conditioning cache (P3 / E4): conditioning is invariant across the denoising
 #     trajectory, so compute it ONCE per observation instead of every step. In the naive
 #     baseline the conditioning is recomputed each of N_DENOISE_STEPS steps; caching removes
 #     the (N-1)x. Modeled by `reasoner_cached` (see policy/pipeline.py). Must be invalidated
 #     per new observation (§3).
-#   - Cache-DiT (G4 / E5, lossy): reuse cached DiT block outputs across adjacent steps ->
+#   - Cache-DiT (E5, lossy): reuse cached DiT block outputs across adjacent steps ->
 #     fewer effective step-compute (~1.40 on the denoise loop).
-#   - FP8 (G4 / E6, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
+#   - FP8 (E6, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
 #     peak memory.
 # ---------------------------------------------------------------------------
 _FLASH_REASONER = 1.30
@@ -122,63 +124,41 @@ def _mul(d: dict, stage: str, factor: float) -> None:
     d[stage] = round(d.get(stage, 1.0) * factor, 5)
 
 
-# ---- Reasoner conditioning waterfall: R0 -> R3 ------------------------------------
-# cuDNN fused-attention baseline (see module docstring): no math baseline / "+Flash" rung on
-# this native-PyTorch reference path — the framework has no math backend.
-def _reasoner_ladder() -> list[Config]:
-    m: dict = {}   # cumulative multipliers on reasoner_conditioning
+# ---- Native-PyTorch reference waterfall: P0 -> P3 ---------------------------------
+# ONE ladder for the native path (§5.3.1). The old reasoner (R) + generator (G) ladders ran the
+# SAME single MoT inference (Cosmos3VFMNetwork) and gave identical on-box numbers, so they are
+# merged here. cuDNN fused-attention baseline (no math / "+Flash" rung — the framework has no math
+# backend); each rung CUMULATIVELY adds one native technique. Cache-DiT + FP8 are vLLM-Omni-only
+# (§5.3.3) and live on the E ladder — keeping them off P avoids a mid-waterfall backend switch.
+def _native_ladder() -> list[Config]:
+    mr: dict = {}   # reasoner_conditioning multipliers
+    mg: dict = {}   # generator (prepare + denoise) multipliers
     rows = [
-        ("R0", "BF16 + cuDNN fused attention", "", {}, False),
-        ("R1", "+ torch.compile", "torch.compile",
-         {"compile": True}, False),
-        ("R2", "+ CUDA graph replay", "cuda-graphs",
-         {"cuda_graphs": True}, False),
-        ("R3", "+ Reasoner conditioning cache", "reasoner-conditioning-cache",
+        ("P0", "BF16 + cuDNN fused attention", "", {}, False),
+        ("P1", "+ torch.compile", "torch.compile", {"compile": True}, False),
+        ("P2", "+ CUDA graph replay", "cuda-graphs", {"cuda_graphs": True}, False),
+        ("P3", "+ Reasoner conditioning cache", "reasoner-conditioning-cache",
          {"reasoner_cache": True}, False),
     ]
-    out, cached = [], False
+    out, cached, flags_acc = [], False, {}
     for i, (cid, label, added, flags, lossy) in enumerate(rows):
+        flags_acc = {**flags_acc, **flags}          # cumulative: each rung keeps the prior knobs
         if added == "torch.compile":
-            _mul(m, "reasoner_conditioning", _COMPILE_REASONER)
+            _mul(mr, "reasoner_conditioning", _COMPILE_REASONER)
+            _mul(mg, "action_denoising", _COMPILE_DENOISE)
+            _mul(mg, "generator_prepare", _COMPILE_PREP)
         elif added == "cuda-graphs":
-            _mul(m, "reasoner_conditioning", _CUDAGRAPH_REASONER)
+            _mul(mr, "reasoner_conditioning", _CUDAGRAPH_REASONER)
+            _mul(mg, "action_denoising", _CUDAGRAPH_DENOISE)
+            _mul(mg, "generator_prepare", _CUDAGRAPH_PREP)
         elif added == "reasoner-conditioning-cache":
             cached = True
-        out.append(Config(cid, REASONER, label, i, added, lossy,
-                          stage_flags=dict(flags), stage_multipliers=dict(m),
+        out.append(Config(cid, NATIVE, label, i, added, lossy,
+                          stage_flags=dict(flags_acc), stage_multipliers={**mr, **mg},
                           reasoner_cached=cached,
                           note=("compute conditioning once/observation, reuse across "
                                 "denoising steps; invalidate per new observation"
                                 if added.endswith("cache") else "")))
-    return out
-
-
-# ---- Generator waterfall: G0 -> G4 ------------------------------------------------
-# cuDNN fused-attention baseline like the R ladder (no math / "+Flash" rung). Cache-DiT + FP8
-# are the lossy vLLM-Omni rungs (§5.3.3), routed off this path by compat.resolve_backend.
-def _generator_ladder() -> list[Config]:
-    m: dict = {}   # cumulative multipliers on generator_prepare + action_denoising
-    rows = [
-        ("G0", "BF16 + cuDNN fused attention", "", {}, False),
-        ("G1", "+ torch.compile", "torch.compile", {"compile": True}, False),
-        ("G2", "+ CUDA graph replay", "cuda-graphs", {"cuda_graphs": True}, False),
-        ("G3", "+ Cache-DiT", "cache-dit", {"cache_dit": True}, True),
-        ("G4", "+ Dynamic FP8 quantization", "fp8", {"quantization": "fp8"}, True),
-    ]
-    out = []
-    for i, (cid, label, added, flags, lossy) in enumerate(rows):
-        if added == "torch.compile":
-            _mul(m, "action_denoising", _COMPILE_DENOISE)
-            _mul(m, "generator_prepare", _COMPILE_PREP)
-        elif added == "cuda-graphs":
-            _mul(m, "action_denoising", _CUDAGRAPH_DENOISE)
-            _mul(m, "generator_prepare", _CUDAGRAPH_PREP)
-        elif added == "cache-dit":
-            _mul(m, "action_denoising", _CACHEDIT_DENOISE)
-        elif added == "fp8":
-            _mul(m, "action_denoising", _FP8_DENOISE)
-        out.append(Config(cid, GENERATOR, label, i, added, lossy,
-                          stage_flags=dict(flags), stage_multipliers=dict(m)))
     return out
 
 
@@ -227,13 +207,11 @@ def _end_to_end_ladder() -> list[Config]:
     return out
 
 
-REASONER_LADDER: list[Config] = _reasoner_ladder()
-GENERATOR_LADDER: list[Config] = _generator_ladder()
+NATIVE_LADDER: list[Config] = _native_ladder()
 END_TO_END_LADDER: list[Config] = _end_to_end_ladder()
 
 _LADDERS: dict[str, list[Config]] = {
-    REASONER: REASONER_LADDER,
-    GENERATOR: GENERATOR_LADDER,
+    NATIVE: NATIVE_LADDER,
     END_TO_END: END_TO_END_LADDER,
 }
 
@@ -247,8 +225,8 @@ def ladder(waterfall: str) -> list[Config]:
 def all_configs() -> list[Config]:
     """Every rung of every ladder — the full single-GPU matrix run by run_matrix.py.
 
-    Order: R0-R3, G0-G4, E0-E6 (the combined end-to-end configurations)."""
-    return [*REASONER_LADDER, *GENERATOR_LADDER, *END_TO_END_LADDER]
+    Order: P0-P3 (native PyTorch), E0-E6 (the combined end-to-end vLLM configurations)."""
+    return [*NATIVE_LADDER, *END_TO_END_LADDER]
 
 
 def config_by_id(cid: str) -> Config:

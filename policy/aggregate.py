@@ -23,8 +23,7 @@ import numpy as np
 
 from policy.configs import (
     END_TO_END,
-    GENERATOR,
-    REASONER,
+    NATIVE,
     WATERFALLS,
     ladder,
 )
@@ -32,9 +31,8 @@ from policy.logs import read_jsonl
 
 # The per-request metric each waterfall reduces (built from the JSONL latency block).
 WATERFALL_METRIC = {
-    REASONER: ("reasoner_ms", "reasoner conditioning (ms)"),
-    GENERATOR: ("generator_stage_ms", "generator prepare + denoising (ms)"),
-    END_TO_END: ("total_chunk_ms", "observation → 32-action chunk (ms)"),
+    NATIVE: ("total_chunk_ms", "native PyTorch: observation → 32-action chunk (ms)"),
+    END_TO_END: ("total_chunk_ms", "vLLM stack: observation → 32-action chunk (ms)"),
 }
 
 # JSONL latency_ms block -> the six §3 stage-breakdown buckets.
@@ -169,7 +167,7 @@ def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
 def build_quality_comparison(results: dict[str, ConfigResult]) -> dict:
     """Lossy-technique gate: Cache-DiT / FP8 rungs, their drift, gate verdict, speedup."""
     rows = []
-    for wf in (GENERATOR, END_TO_END):
+    for wf in WATERFALLS:                                  # lossy rungs live on E (Cache-DiT/FP8)
         rungs = [c for c in ladder(wf) if c.cid in results]
         if not rungs:
             continue

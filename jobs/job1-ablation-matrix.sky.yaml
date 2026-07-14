@@ -88,6 +88,11 @@ run: |
   # 2) Aggregate (Job 5) — waterfalls + stage breakdown + CIs + CSV/Parquet + quality tables.
   uv run python aggregate.py --out-dir results
 
+  # 2b) torch.profiler Chrome traces (Perfetto dashboard) for a couple of native-PyTorch configs
+  #     -> ${OUTPUT_URI}raw/traces/. Self-guards: skips unless cosmos_framework + the checkpoint
+  #     are present (deploy/profile_and_upload.sh).
+  bash deploy/profile_and_upload.sh /local/replay/manifest.json || true
+
   # 3) Publish to Nebius object storage: RAW per-config logs (every <cid>.jsonl + summary /
   #    environment / system-info / status) to raw/, plus the aggregate figures/tables at the top.
   if command -v aws >/dev/null 2>&1; then

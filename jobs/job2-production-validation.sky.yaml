@@ -59,6 +59,10 @@ run: |
     --configurations "${CONFIGS}"
   uv run python aggregate.py --out-dir results-production
 
+  # torch.profiler Chrome traces (Perfetto dashboard) -> ${OUTPUT_URI}raw/traces/. Self-guards:
+  # skips unless the native-PyTorch stack (cosmos_framework + checkpoint) is present.
+  bash deploy/profile_and_upload.sh /local/replay/manifest.json || true
+
   if command -v aws >/dev/null 2>&1; then
     aws s3 cp results-production/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"
     aws s3 cp results-production/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "${AWS_ENDPOINT_URL}"
