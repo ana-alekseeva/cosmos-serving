@@ -43,16 +43,21 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 # 13.1.1.3 is the patched pin torch 2.13+cu130 ships — override to it. NB this is why setup.sh
 # runs fine on a VM: without a cu-group it gets PyPI torch 2.10.0 = the cu128 build + cuBLAS
 # 12.8.4.1, which works on the same GPU/driver.
-# Do NOT `uv sync` here: the image is already synced to the lock, so a runtime sync only PRUNES
-# the fixes (this cuBLAS override, the cuDNN>=9.22 bump, the baked editable cosmos-serving).
+# ORDER MATTERS: `uv sync` FIRST — it heals a stale image up to the lock (an image baked without
+# --all-extras is missing mainline deps like iopath and the matrix dies on import), but it also
+# PRUNES anything not in the lock. So every override (this cuBLAS pin, the cuDNN>=9.22 bump, the
+# editable cosmos-serving that sync uninstalls) MUST come after it, never before.
 # Names: PyPI renamed the CUDA-13 libs — nvidia-cublas-cu13 / nvidia-cuda-runtime-cu13 are dead
 # 0.0.1 stubs; the real wheels are UNSUFFIXED nvidia-cublas / nvidia-cuda-runtime. cuDNN kept -cu13.
 # If the pin still fails, the preflight escalates to the newest cuBLAS via LD_PRELOAD, and dumps a
 # raw-cuBLAS probe (torch-side vs node-side) before giving up.
-# NB: `uv pip install` targets the active $VIRTUAL_ENV — pin --python or libs land in the wrong venv.
+# NB: `uv pip install` targets the active $VIRTUAL_ENV — pin --python or libs land in the wrong
+# venv (project-scoped `uv sync` is immune; setup.sh dodges it with `unset VIRTUAL_ENV`).
 PYMODEL="$FRAMEWORK/.venv/bin/python"
+( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server )
 uv pip install -qU --python "$PYMODEL" \
     "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
+uv pip install -q --python "$PYMODEL" -e "$SERVING"
 
 # Deterministic cuBLAS (the policy server runs with deterministic_seed=True) needs a workspace
 # config; without it some cuBLAS paths fail to initialize. Set globally, preflight probes WITH it
