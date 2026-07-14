@@ -57,16 +57,16 @@ RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_R
 # 1) Harness venv: mock / capture (tfds+tf-cpu via the `capture` extra) / vLLM tooling.
 RUN cd /opt/cosmos-serving && uv sync --extra capture
 
-# 2) Model venv for the NATIVE-PyTorch path (§5.3.1): the `cu130` group (torch 2.10.0+cu130 +
-#    flash-attn/natten from the cosmos index + cosmos_framework), plus `policy-server`, plus this
-#    harness editable so `import policy` works. NOTE: cosmos-framework declares `vllm` and `cu130`
-#    as CONFLICTING uv groups ([tool.uv].conflicts) — one venv can't have both, so this image is the
-#    native (cu130) runtime; the vLLM E-ladder / jobs 2/2b need a separate `--group vllm` env.
-#    The `cu130` group pins nvidia-cudnn-cu13==9.15.1 (< 9.22), so we still bump cuDNN to enable the
-#    fused-attention backend (torch loads cuDNN from the wheel; the bump raises cudnn.version() at
-#    runtime — torch.cuda.is_available() is False during build, so it only flips True on the GPU box).
+# 2) Model venv for the NATIVE-PyTorch path (§5.3.1): EXACTLY the command deploy/setup.sh uses —
+#    the one that produced the working results-real on this H200 (torch 2.10.0+cu130 from the cosmos
+#    index + cosmos_framework + policy-server + this harness editable so `import policy` works).
+#    Do NOT add `--group cu130`: that group re-pins the nvidia-cu13 CUDA libraries (cuDNN 9.15.1 +
+#    the group's cuBLAS) to a set that fails cuBLASLt init at runtime on H200
+#    (CUBLAS_STATUS_NOT_INITIALIZED at the first GEMM). `--all-extras` selects NEITHER the `vllm` nor
+#    the `cu130` group, so there is no vllm/cu130 conflict, and base/extras already resolve the
+#    working cu130 torch. We still bump cuDNN >= 9.22 below for the fused-attention backend.
 RUN cd /opt/cosmos-framework \
-    && uv sync --all-extras --group cu130 --group policy-server \
+    && uv sync --all-extras --group policy-server \
     && uv pip install -e /opt/cosmos-serving \
     && cuver="$(uv run python -c 'import torch; print(torch.backends.cudnn.version() or 0)')" \
     && cumaj="$(uv run python -c 'import torch; print((torch.version.cuda or "13").split(".")[0])')" \
