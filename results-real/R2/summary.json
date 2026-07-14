@@ -1,0 +1,82 @@
+{
+  "run_id": "cosmos-droid-001",
+  "configuration": "R2",
+  "waterfall": "reasoner",
+  "engine": "pytorch",
+  "batch_size": 1,
+  "lossy_quality_gated": false,
+  "warmup_requests": 5,
+  "measured_requests": 50,
+  "percentiles": {
+    "n_requests": 50,
+    "preprocess_ms": {
+      "p50": 44.221,
+      "p90": 45.305,
+      "p99": 52.508
+    },
+    "h2d_ms": {
+      "p50": 0.0,
+      "p90": 0.0,
+      "p99": 0.0
+    },
+    "reasoner_ms": {
+      "p50": 0.0,
+      "p90": 0.0,
+      "p99": 0.0
+    },
+    "generator_prepare_ms": {
+      "p50": 80.48,
+      "p90": 81.904,
+      "p99": 84.222
+    },
+    "denoising_ms": {
+      "p50": 724.597,
+      "p90": 729.157,
+      "p99": 730.802
+    },
+    "postprocess_ms": {
+      "p50": 0.051,
+      "p90": 0.056,
+      "p99": 0.069
+    },
+    "d2h_ms": {
+      "p50": 0.0,
+      "p90": 0.0,
+      "p99": 0.0
+    },
+    "server_ms": {
+      "p50": 850.176,
+      "p90": 854.6,
+      "p99": 857.814
+    },
+    "transport_ms": {
+      "p50": 0.0,
+      "p90": 0.0,
+      "p99": 0.0
+    },
+    "first_action_ms": {
+      "p50": 850.176,
+      "p90": 854.6,
+      "p99": 857.814
+    },
+    "total_chunk_ms": {
+      "p50": 850.176,
+      "p90": 854.6,
+      "p99": 857.814
+    },
+    "peak_memory_mb": {
+      "p50": 30952.878,
+      "p90": 30952.878,
+      "p99": 30952.878
+    },
+    "denoising_step_ms": {
+      "p50": 90.95,
+      "p90": 92.077,
+      "p99": 93.467
+    },
+    "quality_gate": {
+      "n/a": 50
+    }
+  },
+  "quality_drift": null
+}

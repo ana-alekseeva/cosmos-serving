@@ -1,0 +1,10 @@
+{
+  "configuration": "R2",
+  "ok": true,
+  "is_baseline": false,
+  "started_at": "2026-07-14T15:16:29.111791+00:00",
+  "finished_at": "2026-07-14T15:17:51.650731+00:00",
+  "warmup_requests": 5,
+  "measured_requests": 50,
+  "error": null
+}

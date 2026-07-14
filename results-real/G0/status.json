@@ -1,0 +1,10 @@
+{
+  "configuration": "G0",
+  "ok": true,
+  "is_baseline": false,
+  "started_at": "2026-07-14T15:10:56.531561+00:00",
+  "finished_at": "2026-07-14T15:12:14.618740+00:00",
+  "warmup_requests": 5,
+  "measured_requests": 50,
+  "error": null
+}

@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-07-14T15:15:06.040086+00:00",
+  "engine": "pytorch",
+  "model": "nvidia/Cosmos3-Nano-Policy-DROID",
+  "python": "3.13.14",
+  "packages": {
+    "numpy": "2.2.6",
+    "torch": "2.10.0+cu130",
+    "vllm": "absent",
+    "matplotlib": "3.10.8"
+  },
+  "stage_flags": {
+    "reasoner_cache": true
+  },
+  "reasoner_sampling": {
+    "max_tokens": 256,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": -1,
+    "repetition_penalty": 1.0
+  },
+  "generator_sampling": {
+    "steps": 4,
+    "guidance": 3.0,
+    "shift": 5.0,
+    "cfg_mode": "full-range-null"
+  },
+  "torchinductor_cache_dir": "/tmp/torchinductor/R3"
+}

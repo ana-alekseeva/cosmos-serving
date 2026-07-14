@@ -1,0 +1,27 @@
+{
+  "run_id": "cosmos-droid-001",
+  "backend": "pytorch",
+  "output_dir": "results-real",
+  "configurations_run": [
+    "G1",
+    "G2",
+    "G0",
+    "R0",
+    "R3",
+    "R1",
+    "R2"
+  ],
+  "failed": [],
+  "skipped": [],
+  "baseline_drift": null,
+  "rejected": false,
+  "config_backends": {
+    "R0": "pytorch",
+    "R1": "pytorch",
+    "R2": "pytorch",
+    "R3": "pytorch",
+    "G0": "pytorch",
+    "G1": "pytorch",
+    "G2": "pytorch"
+  }
+}

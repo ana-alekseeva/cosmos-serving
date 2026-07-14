@@ -1,0 +1,18 @@
+{
+  "captured_at": "2026-07-14T15:09:19.163356+00:00",
+  "platform": "Linux-6.11.0-1016-nvidia-x86_64-with-glibc2.39",
+  "processor": "x86_64",
+  "gpu": {
+    "available": true,
+    "gpus": [
+      {
+        "name": "NVIDIA H200",
+        "driver_version": "580.159.04",
+        "temperature_gpu_c": "62",
+        "clock_sm_mhz": "1755",
+        "clock_mem_mhz": "3201",
+        "power_draw_w": "650.62"
+      }
+    ]
+  }
+}
