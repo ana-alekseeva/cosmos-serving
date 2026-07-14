@@ -31,11 +31,20 @@ uv sync                                              # creates .venv/ with the h
 set +u; source .venv/bin/activate; set -u            # activate .venv for this script
 uv pip install tensorflow-datasets tensorflow-cpu huggingface_hub   # DROID capture (RLDS tfrecords) + HF CLI
 
-# 2b. Real-backend libraries (skipped if already importable — the cosmos3 image has them). The
-#     native PyTorch path (§5.3.1 — R/G configs) needs torch; the routed E / Cache-DiT / FP8
-#     configs need vLLM + vLLM-Omni (§5.3.3, matching major.minor).
-python -c "import torch" 2>/dev/null || uv pip install torch       # native PyTorch backend
-uv pip install cosmos-guardrail                                    # required Generator safety guard
+# 2b. Native PyTorch backend (§5.3.1) runs Cosmos3-Nano-Policy-DROID through cosmos-framework —
+#     a heavy, self-contained stack (torch + the 16B model machinery) that wants its OWN env.
+#     Clone it, sync its policy-server extras, and install THIS harness into that env so both
+#     `import cosmos_framework` and `import policy` work; --backend pytorch runs then use
+#     cosmos-framework's venv. VERIFY the uv groups against the cosmos-framework README.
+COSMOS_DIR="$(cd "$root/.." && pwd)/cosmos-framework"
+if [ ! -d "$COSMOS_DIR" ]; then
+  git clone https://github.com/NVIDIA/cosmos-framework "$COSMOS_DIR"
+fi
+( cd "$COSMOS_DIR"
+  uv sync --all-extras --group=policy-server     # torch + cosmos + policy-server deps (VERIFY groups)
+  uv pip install -e "$root"                       # make this harness importable inside cosmos's env
+)
+echo "cosmos-framework env ready: $COSMOS_DIR/.venv  (activate it for --backend pytorch)"
 
 # 3. Secrets from .env (gitignored). Copy .env.example -> .env and fill it in first.
 if [ ! -f .env ]; then
@@ -59,24 +68,27 @@ else
   echo "      vllm/vllm-omni:cosmos3 image):  uv pip install vllm vllm-omni   # VERIFY versions" >&2
 fi
 
-cat <<'NEXT'
+cat <<NEXT
 
-setup done. Activate the venv in THIS shell, then do the 1-sample run:
+setup done. Two envs: the harness .venv (mock / capture / vLLM) and cosmos-framework's
+.venv ($COSMOS_DIR/.venv) for the native PyTorch backend.
 
+  # capture ONE real DROID observation (harness venv) — shared by every config
   source .venv/bin/activate
-
-  # capture ONE real DROID observation (shared by every config)
   python -m policy.capture --n 1 --out /local/replay
 
-  # smoke ONE native-PyTorch config (R0) and ONE vLLM config (E0)
-  python run_configuration.py --configuration R0 --backend pytorch \
-    --manifest /local/replay/manifest.json --checkpoint-dir /local/model \
+  # native-PyTorch config R0 (§5.3.1) — run inside cosmos-framework's env
+  source $COSMOS_DIR/.venv/bin/activate
+  python run_configuration.py --configuration R0 --backend pytorch \\
+    --manifest /local/replay/manifest.json --checkpoint-dir /local/model \\
     --replay-size 1 --warmups 0 --out-dir results-smoke
-  python run_configuration.py --configuration E0 --backend vllm \
+
+  # vLLM config E0 (§5.3.3) — needs vLLM + vLLM-Omni in the active env
+  python run_configuration.py --configuration E0 --backend vllm \\
     --manifest /local/replay/manifest.json --replay-size 1 --warmups 0 --out-dir results-smoke
 
-  # then the full 1-sample matrix (auto-routes R/G->pytorch, G4/G5+E->vllm)
-  python run_matrix.py --backend pytorch --smoke \
+  # full 1-sample matrix (auto-routes R/G->pytorch, G4/G5+E->vllm) — run where both stacks import
+  python run_matrix.py --backend pytorch --smoke \\
     --input-manifest /local/replay/manifest.json --output-dir results-smoke
   python aggregate.py --out-dir results-smoke
 NEXT
