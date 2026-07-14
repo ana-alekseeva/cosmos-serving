@@ -23,6 +23,13 @@ cd "$SERVING"
 [ -f "$SERVING/.env" ] && { set -a; . "$SERVING/.env"; set +a; }
 : "${HF_TOKEN:?set HF_TOKEN (inject .env, or pass nebius --env-secret HF_TOKEN=...)}"
 : "${BACKEND:=pytorch}"; : "${MODE:=matrix}"; : "${CONFIGS:=}"
+# This native cu130 image has NO vLLM. The E-ladder (E0-E6) routes to the vLLM backend
+# (policy/compat.resolve_backend) and dies here with "No such file or directory: 'vllm'". So for the
+# pytorch matrix, default to the native P ladder unless CONFIGS is set explicitly. Run the E-ladder
+# on a separate --group vllm image (BACKEND=vllm CONFIGS=E0,...,E6).
+if [ "$MODE" = matrix ] && [ "$BACKEND" = pytorch ] && [ -z "$CONFIGS" ]; then
+  CONFIGS="P0,P1,P2,P3"
+fi
 : "${REPLAY_N:=50}"; : "${REPLAY_SIZE:=50}"; : "${WARMUPS:=5}"; : "${OUTPUT_DIR:=results}"
 mkdir -p /local/replay /local/model
 
