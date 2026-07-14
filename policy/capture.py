@@ -56,6 +56,9 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
     IDENTICAL across Jobs 1 & 2 (§5/§8). Static-shape requirement (§9): observations whose
     image resolution differs from the first kept one are skipped (CUDA-graph rungs need a
     single bucketed shape) — logged so the drop is not silent."""
+    import os
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")   # hide TF INFO/WARNING (oneDNN, GCS auth fallback)
+    os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")  # drop the oneDNN notice
     import numpy as np
     try:
         import tensorflow_datasets as tfds
