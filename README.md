@@ -123,8 +123,9 @@ public — no build secret needed.
 Push it to a Nebius Container Registry:
 ```bash
 PROJECT_ID=<project-id>; REGION=eu-north1
-nebius registry create --name cosmos-droid --parent-id "$PROJECT_ID"    # once; note the registry-… id
-REGISTRY_ID=<registry-id>                                               # nebius registry list --parent-id "$PROJECT_ID"
+nebius registry create --name cosmos-droid --parent-id "$PROJECT_ID"    # once; control plane shows id "registry-e00…"
+REGISTRY_ID=e00k6drmprp0pm6zcf                                          # ⚠ the id WITHOUT the "registry-" prefix — the
+                                                                       #   CR *path* uses the bare id (registry get shows the prefixed form)
 nebius iam get-access-token | docker login "cr.${REGION}.nebius.cloud" --username iam --password-stdin
 IMAGE="cr.${REGION}.nebius.cloud/${REGISTRY_ID}/cosmos-droid-bench-native:latest"
 docker build --platform linux/amd64 -f deploy/Dockerfile -t "$IMAGE" . # x86_64 wheels — build on x86 for speed
