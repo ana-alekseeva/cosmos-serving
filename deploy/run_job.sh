@@ -46,13 +46,19 @@ python -m policy.capture --n "$REPLAY_N" --out /local/replay
 [ "$BACKEND" = pytorch ] && hf download "$MODEL" --local-dir /local/model
 
 # --- run in the MODEL venv (torch + cosmos_framework + policy) ---
-# torch 2.10.0+cu130 must load its OWN pip cuBLAS/cuda-runtime wheels, but uv sync is lock-driven and
-# cosmos-framework's lock leaves them out (it expects the box's system CUDA). In this
-# nvidia/cuda:13.0.0-devel image torch then falls back to the image's system cuBLAS and every GEMM
-# fails with CUBLAS_STATUS_INVALID_VALUE. Install the pip nvidia-cu13 CUDA libs EXPLICITLY after the
-# sync (uv sync prunes anything not in the lock) so torch uses its matching, self-contained cuBLAS.
-( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server \
-    && uv pip install -qU "nvidia-cudnn-cu13>=9.22" nvidia-cublas-cu13 nvidia-cuda-runtime-cu13 )
+# torch 2.10.0+cu130 must load its OWN pip CUDA wheels, but cosmos-framework's lock leaves
+# cuBLAS/cuda-runtime out (it expects the box's system CUDA), so torch falls back to this
+# nvidia/cuda:13.0.0-devel image's OLDER system cuBLAS (13.0 vs the 13.1 torch was built against)
+# and every GEMM fails with CUBLAS_STATUS_INVALID_VALUE. Do NOT `uv sync` here: the image is already
+# synced to that same lock, so a runtime sync only PRUNES the fixes (these wheels, the cuDNN>=9.22
+# bump, the baked editable cosmos-serving). Install exactly what torch 2.10.0+cu130 declares.
+# Names: PyPI renamed the CUDA-13 libs — nvidia-cublas-cu13 / nvidia-cuda-runtime-cu13 are dead
+# 0.0.1 stubs that fail at build; the real wheels are UNSUFFIXED nvidia-cublas / nvidia-cuda-runtime
+# (13.x). Only cuDNN kept the -cu13 suffix.
+# NB: the harness venv is still active, and `uv pip install` targets $VIRTUAL_ENV — pin --python
+# or the libs land in the wrong venv.
+uv pip install -qU --python "$FRAMEWORK/.venv/bin/python" \
+    "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.0.3" "nvidia-cuda-runtime==13.0.96"
 # shellcheck disable=SC1091
 source "$FRAMEWORK/.venv/bin/activate"
 
@@ -77,8 +83,8 @@ def v(p):
     try: return version(p)
     except PackageNotFoundError: return "absent"
 print("PREFLIGHT torch", torch.__version__, "toolkit_cuda", torch.version.cuda, "cudnn", torch.backends.cudnn.version())
-print("PREFLIGHT wheels cublas", v("nvidia-cublas-cu13"), "cudnn", v("nvidia-cudnn-cu13"),
-      "cuda_runtime", v("nvidia-cuda-runtime-cu13"))
+print("PREFLIGHT wheels cublas", v("nvidia-cublas"), "cudnn", v("nvidia-cudnn-cu13"),
+      "cuda_runtime", v("nvidia-cuda-runtime"))
 print("PREFLIGHT gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
 ok = True
 for dt in ("float32", "float16", "bfloat16"):
