@@ -1,6 +1,6 @@
 """PyTorch ablation matrix orchestrator (specification_revised.txt §4 Job 1, §8).
 
-Runs every single-GPU configuration (R0-R3, G0-G4, E0-E6) as an isolated subprocess so
+Runs every single-GPU configuration (P0-P3, E0-E6) as an isolated subprocess so
 each releases its CUDA context before the next starts (§4). Applies the §8 bias controls
 for one long provisioned job:
 

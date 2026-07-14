@@ -18,7 +18,7 @@ policy/configs.py, policy/multigpu.py). Those are the *model's* placeholder numb
 away the moment the real vLLM / vLLM-Omni backend measures wall-clock on the GPU; they are
 not "parameters of a run". Everything a human would call a hyperparameter is here.
 
-NB: distinct from policy/configs.py, which BUILDS the optimization ladders (R0-R3, G0-G4,
+NB: distinct from policy/configs.py, which BUILDS the optimization ladders (P0-P3,
 E0-E6) from those simulator anchors. This module only holds declarative parameters.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ class RunConfig:
     input_manifest: str = "policy/mock/manifest.json"
     output_dir: str = "results"
     torchinductor_root: str = "/tmp/torchinductor"   # per-config subdir /tmp/torchinductor/<cid>
-    configurations: tuple = ()                    # cids to run; empty = full matrix (R0-R3,G0-G4,E0-E6)
+    configurations: tuple = ()                    # cids to run; empty = full matrix (P0-P3,E0-E6)
     baseline_at_start_and_end: bool = True
     randomize_order: bool = True
     order_seed: int = 7

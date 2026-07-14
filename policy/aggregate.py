@@ -3,7 +3,7 @@
 A small CPU job that merges every per-configuration subprocess output and generates:
 
   * CSV (+ Parquet if pandas/pyarrow present) per-configuration summaries
-  * Waterfall data — reasoner (R0-R3), generator (G0-G4), end-to-end (E0-E6),
+  * Waterfall data — native PyTorch (P0-P3), end-to-end vLLM (E0-E6),
     each with cumulative (vs baseline) and marginal (vs prev) speedups
   * Confidence intervals (numpy bootstrap over the raw per-request samples)
   * Stage breakdown for baseline and final (the six §3 stages)

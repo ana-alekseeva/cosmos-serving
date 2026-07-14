@@ -41,32 +41,26 @@ The project must produce:
 
 # 3. Waterfall configurations
 
-## Reasoner conditioning waterfall
+## Native-PyTorch reference waterfall (P)
 
-The Reasoner is measured only as part of action-policy conditioning; it does not generate standalone text.
+`Cosmos3-Nano-Policy-DROID` is a unified Mixture-of-Transformers (`Cosmos3VFMNetwork` — one `net`
+forward per denoising step, sharing the `Qwen3-VL` backbone), so the reasoner and generator are **one
+inference**, not two separable towers. A separate "reasoner" vs "generator" ladder produced identical
+on-box numbers, so they are merged into a single native ladder **P**. It measures `total_chunk_ms` plus
+the full per-stage breakdown.
 
 | ID   | Configuration                                      |
 | ---- | -------------------------------------------------- |
-| `R0` | BF16 + cuDNN fused attention (baseline)            |
-| `R1` | Add `torch.compile`                                |
-| `R2` | Add CUDA graph replay                              |
-| `R3` | Cache Reasoner conditioning across diffusion steps |
+| `P0` | BF16 + cuDNN fused attention (baseline)            |
+| `P1` | Add `torch.compile`                                |
+| `P2` | Add CUDA graph replay                              |
+| `P3` | Cache Reasoner conditioning across diffusion steps |
 
-**Attention baseline (R/G).** The native-PyTorch reference path runs on `cosmos_framework`, whose attention dispatcher exposes only *fused* backends (cuDNN / FlashAttention-2/3 / NATTEN) — there is no math/SDPA backend. So the R/G baseline is torch-native **cuDNN fused attention** (flash-class), pinned via `I4_ATTN_BACKENDS=cudnn` and needing no `flash_attn` build (only cuDNN ≥ 9.22 in the torch runtime). There is therefore no separate "math" baseline or "+Flash" rung on R/G; the math-vs-flash comparison is retained on the end-to-end vLLM ladder (`E0` TORCH_SDPA → `E1` FLASH_ATTN), where both backends exist.
+**Attention baseline (P).** The native-PyTorch reference path runs on `cosmos_framework`, whose attention dispatcher exposes only *fused* backends (cuDNN / FlashAttention-2/3 / NATTEN) — there is no math/SDPA backend. So the P baseline is torch-native **cuDNN fused attention** (flash-class), pinned via `I4_ATTN_BACKENDS=cudnn` and needing no `flash_attn` build (only cuDNN ≥ 9.22 in the torch runtime). There is therefore no separate "math" baseline or "+Flash" rung on P; the math-vs-flash comparison is retained on the end-to-end vLLM ladder (`E0` TORCH_SDPA → `E1` FLASH_ATTN), where both backends exist.
 
 Reasoner caching must be enabled only after verifying that its output is invariant throughout one action-denoising trajectory. The cache must be invalidated for every new observation.
 
-## Generator waterfall
-
-| ID   | Configuration                  |
-| ---- | ------------------------------ |
-| `G0` | BF16 + cuDNN fused attention (baseline) |
-| `G1` | Add `torch.compile`            |
-| `G2` | Add CUDA graph replay          |
-| `G3` | Add Cache-DiT                  |
-| `G4` | Add dynamic FP8 quantization   |
-
-Cache-DiT and FP8 are quality-gated. They are included in the final configuration only when RoboLab performance remains acceptable.
+**Cache-DiT and FP8** are Generator-tower optimizations available only on vLLM-Omni (§5.3.3), so they are **not** P rungs (keeping them off P also avoids a mid-waterfall backend switch); they appear on the end-to-end E ladder (`E5`/`E6`), quality-gated on RoboLab success.
 
 ## End-to-end cumulative waterfall
 
@@ -118,9 +112,8 @@ Do not include CPU offload, HSDP, or VAE patch parallelism in the main latency w
 Runs all single-GPU configurations sequentially as subprocesses:
 
 ```text
-R0–R3
-G0–G4
-combined end-to-end configurations
+P0–P3   (native PyTorch reference)
+E0–E6   (combined end-to-end vLLM configurations)
 ```
 
 Each subprocess:
@@ -159,8 +152,8 @@ for configuration in configurations:
 Use a separate compilation-cache directory for every configuration:
 
 ```text
-/tmp/torchinductor/R0
-/tmp/torchinductor/R1
+/tmp/torchinductor/P0
+/tmp/torchinductor/P1
 ...
 ```
 
@@ -290,7 +283,7 @@ One JSONL row per request:
 ```json
 {
   "run_id": "cosmos-droid-001",
-  "configuration": "G3",
+  "configuration": "E5",
   "engine": "pytorch",
   "task": "RoboLabTask",
   "episode_id": 4,

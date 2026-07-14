@@ -68,7 +68,7 @@ def engine_args(config: Config) -> list[str]:
     else:
         args += ["--enforce-eager"]
 
-    # Reasoner conditioning cache (R3/E4): compute conditioning once/observation (§3).
+    # Reasoner conditioning cache (P3/E4): compute conditioning once/observation (§3).
     if flags.get("reasoner_cache"):
         args += ["--policy-conditioning-cache", "true"]                 # VERIFY flag
 

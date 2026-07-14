@@ -3,7 +3,7 @@
 # INFRA PROVISIONING ONLY. npa provisions ONE target inference GPU (Terraform-backed Nebius
 # AI Job — no manual Kubernetes); this file declares the resources + the command. The ablation
 # LOGIC is this repo's run_matrix.py (cloned + run below), which runs every single-GPU
-# configuration (R0-R4, G0-G5, E0-E6) as an isolated subprocess so each releases its CUDA
+# configuration (P0-P3, E0-E6) as an isolated subprocess so each releases its CUDA
 # context, applies the §8 bias controls, then aggregates (Job 5) into waterfalls + breakdown.
 #
 # ONE GPU (§3: "Do not mix different GPU counts in the primary waterfall"). The separate
@@ -75,8 +75,8 @@ run: |
   [ "${BACKEND}" = "pytorch" ] && hf download "${MODEL}" --local-dir /local/model
 
   # 1) Single-GPU waterfall, each config on its serving backend (policy/compat.resolve_backend):
-  #    R0-R4 + G0-G3 on the native PyTorch reference (§5.3.1); the end-to-end ladder E0-E6 and the
-  #    Generator Cache-DiT/FP8 rungs (G4/G5) on vLLM/vLLM-Omni (§5.3.2/§5.3.3), launched per config.
+  #    P0-P3 on the native PyTorch reference (§5.3.1); the end-to-end ladder E0-E6 (incl. the flash,
+  #    Cache-DiT and FP8 rungs) on vLLM/vLLM-Omni (§5.3.2/§5.3.3), launched per config.
   #    Each configuration is an isolated subprocess (releases its CUDA context on exit).
   uv run python run_matrix.py \
     --config config/experiment.yaml \

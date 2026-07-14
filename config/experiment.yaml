@@ -8,7 +8,7 @@ run:
   input_manifest: /local/replay/manifest.json
   output_dir: results
   torchinductor_root: /tmp/torchinductor   # per-config subdir /tmp/torchinductor/<cid> (§4)
-  configurations: []                    # cids to run; [] = full matrix (R0-R4, G0-G5, E0-E6)
+  configurations: []                    # cids to run; [] = full matrix (P0-P3, E0-E6)
   # §8 bias controls for one long provisioned job:
   baseline_at_start_and_end: true
   randomize_order: true

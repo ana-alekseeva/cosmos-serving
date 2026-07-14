@@ -77,7 +77,7 @@ python run_robolab.py --backend vllm \
   --endpoint-baseline https://<baseline-url> --endpoint-candidate https://<optimized-url>
 ```
 
-To reproduce the **full readable ablation** (R0-R3, G0-G4, E0-E6) you deploy the config you want
+To reproduce the **full readable ablation** (P0-P3, E0-E6) you deploy the config you want
 to compare (each endpoint bakes in one config's flags) and measure it — or run the eager PyTorch
 matrix on a rented/allocated GPU (`run_matrix.py --backend vllm`, which launches its own server
 per config). One serverless endpoint = one engine config, so the workbench path is best for the

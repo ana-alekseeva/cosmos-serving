@@ -23,7 +23,7 @@ serve:
   # (policy/serving.py::engine_args); jobs/deploy-optimized.sh applies them.
   configuration: E6
   engine_args:
-    - --policy-conditioning-cache true       # reasoner conditioning cache (R4/E4)
+    - --policy-conditioning-cache true       # reasoner conditioning cache (P3/E4)
     - --cache-backend cache_dit              # Cache-DiT (lossy — gated by RoboLab subset)
     - --quantization fp8                     # dynamic FP8 (lossy — gated by RoboLab subset)
 

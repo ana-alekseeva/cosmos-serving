@@ -8,7 +8,7 @@
 #
 # The spec notes this MAY be two jobs if vLLM and vLLM-Omni need incompatible environments
 # (vLLM Reasoner validation; vLLM-Omni Generator/full-policy validation). Split by running with
-# CONFIGS="R0,R4" on a vLLM image and CONFIGS="E0,E6" on a vLLM-Omni image if so.
+# CONFIGS="P0,P3" on a vLLM image and CONFIGS="E0,E6" on a vLLM-Omni image if so.
 #
 #   sky jobs launch jobs/job2-production-validation.sky.yaml --secret HF_TOKEN \
 #     --env CONFIGS=E0,E6

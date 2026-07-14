@@ -6,7 +6,7 @@ released on exit. Loads the model, warms up, replays the fixed latency set, and 
 five §7 artifacts (<cid>.jsonl, summary.json, environment.json, system-info.json,
 status.json) into <out-dir>/<out-subdir>/.
 
-    python run_configuration.py --configuration G3 --backend mock --out-dir results
+    python run_configuration.py --configuration P0 --backend mock --out-dir results
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    configuration: str = typer.Option(..., "--configuration", help="config id, e.g. R0 / G3 / E6"),
+    configuration: str = typer.Option(..., "--configuration", help="config id, e.g. P0 / E5 / E6"),
     backend: str = typer.Option("mock", "--backend", help="mock | pytorch | vllm"),
     out_dir: Path = typer.Option(Path("results"), "--out-dir"),
     out_subdir: str = typer.Option(None, "--out-subdir", help="override output subdir (default: cid)"),

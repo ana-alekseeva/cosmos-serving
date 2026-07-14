@@ -13,13 +13,15 @@ single-GPU PyTorch ablation matrix, attributes each optimization to the pipeline
 shrinks, validates the winner through the production vLLM / vLLM-Omni engines, and gates the
 lossy techniques on RoboLab task success.
 
-## Three waterfalls (specification_revised.txt §3)
+## Two waterfalls (specification_revised.txt §3)
 
 | Waterfall | Rungs | Measures |
 |---|---|---|
-| **Reasoner conditioning** | R0 cuDNN-fused → +`torch.compile` → +CUDA graphs → **+conditioning cache** | `reasoner_ms` |
-| **Generator** | G0 cuDNN-fused → +compile → +CUDA graphs → **+Cache-DiT** → **+FP8** | `generator_prepare_ms` + `denoising_ms` |
-| **End-to-end** | E0 eager (math) → +Flash → +compile → +CUDA graphs → +reasoner cache → +Cache-DiT → +FP8 → **final** | `total_chunk_ms` |
+| **Native PyTorch (P)** | P0 cuDNN-fused → +`torch.compile` → +CUDA graphs → **+conditioning cache** | `total_chunk_ms` (+ per-stage breakdown) |
+| **End-to-end (E, vLLM)** | E0 eager (math) → +Flash → +compile → +CUDA graphs → +reasoner cache → +Cache-DiT → +FP8 → **final** | `total_chunk_ms` |
+
+The old reasoner (R) and generator (G) ladders are merged into one native ladder **P** — they ran the
+same single MoT inference and gave identical on-box numbers. Cache-DiT/FP8 are vLLM-only (§5.3.3), on E.
 
 Cache-DiT and FP8 are **lossy → quality-gated**: included in the final configuration only if
 RoboLab success holds (§3, §9). The multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel)
@@ -37,18 +39,18 @@ Managed with [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync
 
-# Job 1 — the full single-GPU ablation matrix (R0-R3, G0-G4, E0-E6) with §8 bias controls
+# Job 1 — the full single-GPU ablation matrix (P0-P3, E0-E6) with §8 bias controls
 # (baseline at start+end, randomized order, drift rejection), each config an isolated subprocess:
 uv run python run_matrix.py --config config/experiment.yaml \
     --input-manifest policy/mock/manifest.json --output-dir results --backend mock
 
 # Job 5 — aggregate: waterfalls + stage breakdown + CIs + CSV/Parquet + quality tables + figures:
 uv run python aggregate.py --out-dir results
-#   -> results/aggregate/waterfall_{reasoner,generator,end_to_end}.png
+#   -> results/aggregate/waterfall_{native,end_to_end}.png
 #      results/aggregate/stage_breakdown.png, quality_comparison.png, summary.csv
 
 # One configuration on its own (the §7 per-config artifacts):
-uv run python run_configuration.py --configuration G3 --backend mock --out-dir results
+uv run python run_configuration.py --configuration P0 --backend mock --out-dir results
 
 # RoboLab subset quality gate (baseline vs final) — the lossy Cache-DiT/FP8 gate:
 uv run python run_robolab.py --baseline E0 --candidate E6
@@ -59,7 +61,7 @@ uv run python run_multigpu.py --backend mock
 
 Example end-to-end result (mock, 4-step DROID recipe): **E0 ≈ 229 ms → E6 ≈ 57 ms (4.0×)**,
 dominated by the reasoner-conditioning cache (the naive baseline recomputes conditioning every
-one of the 4 denoising steps: reasoner R0 183 ms → R3 28 ms); Cache-DiT + FP8 pass the RoboLab
+one of the 4 denoising steps: reasoner P0 183 ms → P3 28 ms); Cache-DiT + FP8 pass the RoboLab
 subset gate. See `results/aggregate/`.
 
 ## Layout
@@ -71,7 +73,7 @@ subset gate. See `results/aggregate/`.
 | `aggregate.py` | Job 5 — merge logs → CSV/Parquet + waterfalls + stage breakdown + CIs + figures |
 | `run_robolab.py` / `run_multigpu.py` | Jobs 3-4 quality gate / the separate multi-GPU experiment |
 | `config/experiment.yaml` | the experiment config (§4 `--config experiment.yaml`) |
-| `policy/configs.py` | the R0-R3 / G0-G4 / E0-E6 configuration matrix + stage-effect model |
+| `policy/configs.py` | the P0-P3 / E0-E6 configuration matrix + stage-effect model |
 | `policy/dataset.py` | fixed ~256-request replay set + the 18-task RoboLab quality subset (§5) |
 | `policy/pipeline.py` | mock per-stage latency engine + vLLM/vLLM-Omni real-backend stub |
 | `policy/measure.py` / `logs.py` | the §6 latency field set, p50/p90/p99, §7 log format |
@@ -101,7 +103,7 @@ configuration's engine flags and measures wall-clock from the server's per-stage
 bash deploy/setup.sh                                        # deps + weights (one-time); prints run cmds
 uv run python -m policy.capture --n 50 --out /local/replay  # capture the real DROID replay set
 uv run python run_matrix.py --input-manifest /local/replay/manifest.json \
-    --output-dir results --backend pytorch                 # routes R/G->pytorch, E/G3/G4->vLLM-Omni
+    --output-dir results --backend pytorch                 # routes P->pytorch, E->vLLM-Omni
 uv run python aggregate.py --out-dir results
 ```
 

@@ -14,7 +14,7 @@ under `torch.profiler` and emit two things —
 Runs in cosmos-framework's env (like `--backend pytorch`), against a captured replay set +
 the local checkpoint.
 
-    python -m policy.profile_pytorch --configuration R1 \
+    python -m policy.profile_pytorch --configuration P1 \
       --manifest /local/replay/manifest.json --checkpoint-dir /local/model \
       --out results-smoke/trace_R1.json --warmups 3
 """
@@ -64,7 +64,7 @@ def profile_config(configuration: str, *, manifest: str, checkpoint_dir: str, ou
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="torch.profiler latency attribution (native PyTorch backend).")
-    ap.add_argument("--configuration", required=True, help="config id, e.g. R0 / R1 / G2")
+    ap.add_argument("--configuration", required=True, help="config id, e.g. P0 / P1 / E2")
     ap.add_argument("--manifest", default="/local/replay/manifest.json")
     ap.add_argument("--checkpoint-dir", default="/local/model")
     ap.add_argument("--out", default="results-smoke/trace.json", help="Chrome trace output path")

@@ -15,7 +15,7 @@ deploy:
   # vLLM-Omni serve args the deploy passes through (--extra-serve-args).
   configuration: E6
   engine_args:
-    - --policy-conditioning-cache true       # reasoner conditioning cache (R4/E4)
+    - --policy-conditioning-cache true       # reasoner conditioning cache (P3/E4)
     - --cache-backend cache_dit              # Cache-DiT (lossy)
     - --quantization fp8                     # dynamic FP8 (lossy)
 

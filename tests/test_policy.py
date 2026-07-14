@@ -14,13 +14,11 @@ from policy.configs import (
     ACTION_CHUNK,
     END_TO_END,
     END_TO_END_LADDER,
-    GENERATOR,
-    GENERATOR_LADDER,
     GENERATOR_SAMPLING,
     N_DENOISE_STEPS,
+    NATIVE,
+    NATIVE_LADDER,
     REASONER_SAMPLING,
-    REASONER,
-    REASONER_LADDER,
     STAGES,
     all_configs,
     config_by_id,
@@ -39,18 +37,17 @@ from policy import robolab
 
 # -- Config matrix (§3) -----------------------------------------------------------
 def test_ladders_match_spec():
-    assert [c.cid for c in REASONER_LADDER] == ["R0", "R1", "R2", "R3"]
-    assert [c.cid for c in GENERATOR_LADDER] == ["G0", "G1", "G2", "G3", "G4"]
+    assert [c.cid for c in NATIVE_LADDER] == ["P0", "P1", "P2", "P3"]
     assert [c.cid for c in END_TO_END_LADDER] == ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
-    # baselines add no technique (R/G start from the cuDNN fused-attention baseline)
-    for lad in (REASONER_LADDER, GENERATOR_LADDER, END_TO_END_LADDER):
+    # baselines add no technique (P starts from the cuDNN fused-attention baseline)
+    for lad in (NATIVE_LADDER, END_TO_END_LADDER):
         assert lad[0].added == "" and not lad[0].lossy
 
 
 def test_only_cachedit_and_fp8_are_lossy():
     lossy = {c.cid for c in all_configs() if c.lossy}
-    # G3 Cache-DiT, G4 FP8, and every E-rung that has enabled them (E5, E6)
-    assert lossy == {"G3", "G4", "E5", "E6"}
+    # Cache-DiT (E5) + FP8 (E6) — vLLM-Omni only; the native P ladder has no lossy rungs.
+    assert lossy == {"E5", "E6"}
 
 
 def test_end_to_end_ladder_is_the_union_spec_lists():
@@ -79,8 +76,8 @@ def test_quality_subset_is_3x3x2():
 # -- §7 log schema ----------------------------------------------------------------
 def test_jsonl_row_has_every_required_field():
     req = build_mock_replay(1)[0]
-    rec = make_engine("mock", config_by_id("G3")).run_request(req)
-    row = rec.to_jsonl_row(run_id="t", configuration="G3", engine="mock")
+    rec = make_engine("mock", config_by_id("E5")).run_request(req)
+    row = rec.to_jsonl_row(run_id="t", configuration="E5", engine="mock")
     assert set(row) >= {"run_id", "configuration", "engine", "task", "episode_id",
                         "request_id", "latency_ms", "denoising_step_ms", "peak_memory_mb",
                         "output_checksum", "quality_gate"}
@@ -116,19 +113,21 @@ def test_reasoner_sampling_is_deterministic():
 # -- Pipeline model invariants ----------------------------------------------------
 def test_reasoner_cache_amortizes_conditioning():
     req = build_mock_replay(1)[0]
-    r0 = make_engine("mock", config_by_id("R0")).run_request(req)   # recompute per step
-    r3 = make_engine("mock", config_by_id("R3")).run_request(req)   # cache -> once
+    p0 = make_engine("mock", config_by_id("P0")).run_request(req)   # recompute per step
+    p3 = make_engine("mock", config_by_id("P3")).run_request(req)   # cache -> once
     # Naive recomputes conditioning every denoising step; caching does it once, so the win
     # scales with the step count (~N_DENOISE_STEPS x), not a fixed factor.
-    assert r0.reasoner_ms > (N_DENOISE_STEPS - 1) * r3.reasoner_ms
+    assert p0.reasoner_ms > (N_DENOISE_STEPS - 1) * p3.reasoner_ms
 
 
-def test_generator_waterfall_isolates_the_reasoner():
-    # In the generator waterfall the reasoner is held at its single-conditioning cost, so it
-    # is (nearly) constant across G0..G4 — only generator stages move.
+def test_native_ladder_reasoner_is_monotonic_and_cache_dominates():
+    # Across the merged native ladder reasoner_ms only goes down (compile/graphs help a little,
+    # the P3 conditioning cache a lot — it removes the per-step recompute).
     req = build_mock_replay(1)[0]
-    reasoners = [make_engine("mock", c).run_request(req).reasoner_ms for c in GENERATOR_LADDER]
-    assert max(reasoners) - min(reasoners) < 5.0                    # ~constant (only jitter)
+    rms = [make_engine("mock", config_by_id(c)).run_request(req).reasoner_ms
+           for c in ("P0", "P1", "P2", "P3")]
+    assert all(a >= b - 1e-6 for a, b in zip(rms, rms[1:]))         # non-increasing
+    assert rms[3] < rms[2] / 2                                      # the cache is the big drop
 
 
 def test_lossless_configs_are_bit_identical_to_baseline():
@@ -175,7 +174,7 @@ def test_matrix_runs_full_grid_and_baseline_drift_zero(aggregated):
 def test_every_waterfall_is_monotonic_non_increasing(aggregated):
     out, _, _ = aggregated
     results = load_results(out)
-    for wf in (REASONER, GENERATOR, END_TO_END):
+    for wf in (NATIVE, END_TO_END):
         from policy.aggregate import build_waterfall
         rungs = build_waterfall(results, wf)["rungs"]
         p50 = [r["p50_ms"] for r in rungs]
@@ -209,14 +208,14 @@ def test_robolab_subset_gate_passes_for_final():
 
 # -- Native PyTorch backend / technique compatibility (§5.3.1 vs §5.3.3) -----------
 def test_pytorch_backend_rejects_vllm_only_techniques():
-    # Cache-DiT (G3/E5) and FP8 (G4/E6) are vLLM-Omni-only (§5.3.3) — not native PyTorch.
-    for cid in ("G3", "G4", "E5", "E6"):
+    # Cache-DiT (E5) and FP8 (E6) are vLLM-Omni-only (§5.3.3) — not native PyTorch.
+    for cid in ("E5", "E6"):
         c = config_by_id(cid)
         assert not compat.supported(c, "pytorch")
         with pytest.raises(UnsupportedTechnique):
             make_engine("pytorch", c)          # __init__ validates -> refuses
-    # The §5.3.1 rungs ARE native-PyTorch (R0-R3, the lossless G0-G2, and E0-E4).
-    for cid in ("R0", "R1", "R2", "R3", "G0", "G1", "G2", "E0", "E1", "E2", "E3", "E4"):
+    # The §5.3.1 rungs ARE native-PyTorch (the whole P ladder, and E0-E4).
+    for cid in ("P0", "P1", "P2", "P3", "E0", "E1", "E2", "E3", "E4"):
         assert compat.supported(config_by_id(cid), "pytorch")
 
 
@@ -236,9 +235,7 @@ def test_end_to_end_and_lossy_route_to_vllm():
     #   the whole end-to-end (E) ladder + the Cache-DiT/FP8 rungs (§5.3.2/§5.3.3).
     for cid in ("E0", "E1", "E2", "E3", "E4", "E5", "E6"):
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
-    for cid in ("G3", "G4"):                          # Cache-DiT / FP8 -> vLLM-Omni
-        assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
-    for cid in ("R0", "R3", "G0", "G2"):              # native §5.3.1 reference rungs
+    for cid in ("P0", "P1", "P2", "P3"):              # native §5.3.1 reference rungs
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "pytorch"
     for c in all_configs():                           # mock dry-run: everything modeled
         assert compat.resolve_backend(c, "mock") == "mock"
@@ -253,5 +250,5 @@ def test_matrix_routes_configs_per_backend(tmp_path):
                      baseline_at_start_and_end=False, randomize_order=False)
     status = run_matrix(exp, spawn=False)             # everything fails off-box; routing still recorded
     cb = status["config_backends"]
-    assert cb["E6"] == "vllm" and cb["G4"] == "vllm" and cb["R0"] == "pytorch"
+    assert cb["E6"] == "vllm" and cb["P0"] == "pytorch"
     assert not status["skipped"]                      # nothing skipped — all routed to a real backend
