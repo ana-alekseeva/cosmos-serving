@@ -206,22 +206,27 @@ class PyTorchPolicyEngine:
     def _obs(self, req: DroidRequest) -> dict:
         """Raw DROID observation dict for RobolabPolicyService._build_sample.
 
-        Keys (from action_policy_server_robolab._build_sample / _extract_observation_image):
-        `prompt` + a single `observation/image` (HWC uint8) + `observation/joint_position` [1,7]
-        + `observation/gripper_position` [1,1]. Using the single exterior view is a smoke
-        simplification; the model was trained on the 3-view concat (wrist + exterior_1 + exterior_2),
-        so for faithful numbers capture those and pass the RoBoArena keys instead (VERIFY)."""
+        Passes the 3 RoBoArena views the model's concat view is built from
+        (`observation/{wrist,exterior_1,exterior_2}_image_left`, from _compose_roboarena_views)
+        + `observation/joint_position` [1,7] + `observation/gripper_position` [1,1] + `prompt`.
+        Older 2-view captures (no exterior_2) fall back to a single `observation/image`."""
         import numpy as np
         from policy.capture import load_capture
 
         o = load_capture(req.capture_ref)
         proprio = np.asarray(o["proprio"], dtype=np.float32).reshape(-1)     # 8-D joint(7)+gripper(1)
-        return {
+        obs = {
             "prompt": o["instruction"],
-            "observation/image": np.asarray(o["exterior"], dtype=np.uint8),  # [H, W, 3]
-            "observation/joint_position": proprio[:7][None, :],              # [1, 7]
-            "observation/gripper_position": proprio[7:8][None, :],           # [1, 1]
+            "observation/joint_position": proprio[:7][None, :],             # [1, 7]
+            "observation/gripper_position": proprio[7:8][None, :],          # [1, 1]
         }
+        if "exterior_2" in o:                                               # 3-view concat (trained view)
+            obs["observation/wrist_image_left"] = np.asarray(o["wrist"], dtype=np.uint8)
+            obs["observation/exterior_image_1_left"] = np.asarray(o["exterior"], dtype=np.uint8)
+            obs["observation/exterior_image_2_left"] = np.asarray(o["exterior_2"], dtype=np.uint8)
+        else:                                                               # older 2-view capture
+            obs["observation/image"] = np.asarray(o["exterior"], dtype=np.uint8)
+        return obs
 
     def close(self) -> None:
         if self._hooks is not None:

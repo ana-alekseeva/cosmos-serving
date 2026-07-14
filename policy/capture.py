@@ -5,10 +5,10 @@ to disk + a manifest that `policy.dataset.load_manifest` reads — so the REAL r
 replays genuine robot observations instead of the synthetic `policy/mock/manifest.json`. Both
 jobs stage this ONE manifest, so their inputs are identical (comparability, §5/§8).
 
-DROID is exactly the observation format Cosmos3-Nano-Policy-DROID consumes: exterior + wrist
-RGB at 180×320, 7 joint + 1 gripper proprio, a language instruction. We keep the two views
-the policy uses (`exterior_image_1_left` + `wrist_image_left`) to match CAMERA_VIEWS, and
-concatenate `joint_position` (7) + `gripper_position` (1) into the 8-D proprio state.
+DROID is exactly the observation format Cosmos3-Nano-Policy-DROID consumes. We capture the
+three RGB views the policy's RoBoArena concat view is built from (`wrist_image_left` +
+`exterior_image_1_left` + `exterior_image_2_left`) plus `joint_position` (7) +
+`gripper_position` (1) as the 8-D proprio state and the language instruction.
 
 Why 50 observations: at batch-1 with fixed shapes, latency is ~content-independent, so a small
 fixed set is representative. We measure each of the 50 once (replay_size=50) — solid p50, ok
@@ -41,8 +41,9 @@ STEPS_PER_EPISODE = 3            # spread the N observations across ~N/3 episode
 DROID_BUILDER_DIR = "gs://gresearch/robotics/droid_100/1.0.0"   # VERIFY the version subdir
 
 # DROID RLDS field names (# VERIFY against your tfds `droid`/`droid_100` build).
-_EXT_KEY = "exterior_image_1_left"   # primary exterior view -> CAMERA_VIEWS[0] "exterior"
-_WRIST_KEY = "wrist_image_left"      # wrist view            -> CAMERA_VIEWS[1] "wrist"
+_EXT_KEY = "exterior_image_1_left"   # exterior view 1 (RoBoArena 3-view concat)
+_EXT2_KEY = "exterior_image_2_left"  # exterior view 2 (RoBoArena 3-view concat)
+_WRIST_KEY = "wrist_image_left"      # wrist view       (RoBoArena 3-view concat)
 _JOINT_KEY = "joint_position"        # 7 joint angles
 _GRIPPER_KEY = "gripper_position"    # 1 gripper position
 _INSTR_KEY = "language_instruction"  # per-step language instruction
@@ -86,6 +87,7 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
                 break
             obs = step["observation"]
             ext = obs[_EXT_KEY].numpy()             # (H, W, 3) uint8   # VERIFY key + dtype
+            ext2 = obs[_EXT2_KEY].numpy()           # second exterior view (3-view concat)
             wrist = obs[_WRIST_KEY].numpy()
             joint = np.reshape(obs[_JOINT_KEY].numpy(), -1)      # (7,)
             gripper = np.reshape(obs[_GRIPPER_KEY].numpy(), -1)  # (1,)
@@ -103,7 +105,7 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
 
             idx = len(reqs)
             npz = out / f"{idx:04d}.npz"
-            np.savez_compressed(npz, exterior=ext, wrist=wrist,
+            np.savez_compressed(npz, exterior=ext, exterior_2=ext2, wrist=wrist,
                                 proprio=proprio, instruction=instr)
             reqs.append(DroidRequest(
                 request_id=idx, task=f"droid-ep{ep_idx}", episode_id=ep_idx,
@@ -129,8 +131,11 @@ def load_capture(capture_ref: str) -> dict:
     """Load one real observation's tensors from a capture .npz (real serving path)."""
     import numpy as np
     d = np.load(capture_ref, allow_pickle=True)
-    return {"exterior": d["exterior"], "wrist": d["wrist"],
-            "proprio": d["proprio"], "instruction": str(d["instruction"])}
+    obs = {"exterior": d["exterior"], "wrist": d["wrist"],
+           "proprio": d["proprio"], "instruction": str(d["instruction"])}
+    if "exterior_2" in d.files:                     # 3-view concat (RoBoArena) captures
+        obs["exterior_2"] = d["exterior_2"]
+    return obs
 
 
 def main() -> None:
