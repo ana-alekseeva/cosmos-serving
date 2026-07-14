@@ -70,14 +70,13 @@ export CUDA_CACHE_PATH=/local/.nv_cache; mkdir -p "$CUDA_CACHE_PATH"
 echo "== PREFLIGHT =="
 df -h / /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/PREFLIGHT smi /'
-rc=0; python - <<'PY' || rc=$?
+rc=0; env -u CUBLAS_WORKSPACE_CONFIG python - <<'PY' || rc=$?
 import torch, sys
 from importlib.metadata import version, PackageNotFoundError
 def v(p):
     try: return version(p)
     except PackageNotFoundError: return "absent"
-print("PREFLIGHT torch", torch.__version__, "toolkit_cuda", torch.version.cuda,
-      "driver_cuda", torch._C._cuda_getDriverVersion(), "cudnn", torch.backends.cudnn.version())
+print("PREFLIGHT torch", torch.__version__, "toolkit_cuda", torch.version.cuda, "cudnn", torch.backends.cudnn.version())
 print("PREFLIGHT wheels cublas", v("nvidia-cublas-cu13"), "cudnn", v("nvidia-cudnn-cu13"),
       "cuda_runtime", v("nvidia-cuda-runtime-cu13"))
 print("PREFLIGHT gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
