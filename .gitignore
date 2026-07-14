@@ -19,3 +19,5 @@ results-production/
 # real DROID captures (policy/capture.py): bulky image tensors, regenerable from droid_100.
 # The committed mock fixture (policy/mock/manifest.json) is the only in-repo replay set.
 data/replay_real/
+# local secrets/config for jobs (jobs/with-env.sh); .env.example is the template
+.env

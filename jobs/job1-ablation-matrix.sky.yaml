@@ -29,7 +29,7 @@ num_nodes: 1
 envs:
   REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY (this repo)
   REPO_REF: "main"
-  MODEL: "nvidia/Cosmos3-Nano-Policy-DROID"
+  # MODEL is read from config/experiment.yaml (single source of truth), not an env var.
   OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/"
   AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
   BACKEND: "pytorch"                # native §5.3.1 reference for R/G; "mock" for a dry run.
@@ -71,6 +71,7 @@ run: |
 
   # Stage the model checkpoint locally for the native PyTorch path (pytorch loads from
   # --checkpoint-dir; the routed vLLM/vLLM-Omni configs pull from HF by id). VERIFY layout.
+  MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml | head -1)"
   [ "${BACKEND}" = "pytorch" ] && huggingface-cli download "${MODEL}" --local-dir /local/model
 
   # 1) Single-GPU waterfall, each config on its serving backend (policy/compat.resolve_backend):

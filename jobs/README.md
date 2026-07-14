@@ -18,6 +18,24 @@ npa configure --interactive         # ~/.npa/{credentials,config}.yaml: project/
 npa workbench --help                # confirm the tool tree
 ```
 
+### Secrets/config via `.env` (auto-loaded)
+
+npa reads secrets from `~/.npa/credentials.yaml` **or from the environment** — it does not
+auto-read a `.env`. Keep every token/id/URI in ONE gitignored `.env` and let
+[with-env.sh](with-env.sh) source it into the environment before the command, so npa (and
+SkyPilot) pick them up automatically:
+
+```bash
+cp .env.example .env                # secrets + Nebius context only (HF_TOKEN, AWS keys, PROJECT_ID/ALIAS/TENANT, …)
+./jobs/with-env.sh npa workbench cosmos deploy --runtime serverless ...   # npa reads os.environ
+./jobs/with-env.sh sky jobs launch jobs/job1-ablation-matrix.sky.yaml     # or: sky ... --env-file .env
+./jobs/with-env.sh bash deploy/setup_gpu.sh
+```
+
+`.env` is gitignored; `.env.example` is the tracked template. (npa's other route — `npa
+configure` writing `~/.npa/credentials.yaml` — also fetches automatically; use whichever you
+prefer, but don't split secrets across both.)
+
 ## 1. Create the serverless endpoint (the workbench resource)
 
 `npa workbench cosmos deploy --runtime serverless` **creates a Nebius Serverless AI Endpoint**

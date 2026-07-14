@@ -23,7 +23,7 @@ num_nodes: 1
 envs:
   REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY
   REPO_REF: "main"
-  MODEL: "nvidia/Cosmos3-Nano-Policy-DROID"
+  # MODEL is read from config/experiment.yaml (single source of truth), not an env var.
   OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/multigpu/"
   AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
 
