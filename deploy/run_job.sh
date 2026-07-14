@@ -55,6 +55,27 @@ python -m policy.capture --n "$REPLAY_N" --out /local/replay
     && uv pip install -qU "nvidia-cudnn-cu13>=9.22" )
 # shellcheck disable=SC1091
 source "$FRAMEWORK/.venv/bin/activate"
+
+# Deterministic cuBLAS (the policy server runs with deterministic_seed=True) needs a workspace
+# config; without it some cuBLAS paths fail to initialize. Cheap + safe — a real candidate fix for
+# the CUBLAS_STATUS_NOT_INITIALIZED at the first GEMM. Set globally for the matrix.
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+
+# Preflight: prove the GPU + cuBLAS work and report FREE memory BEFORE loading the ~30GB model, so a
+# cuBLAS failure is diagnosed (broken node vs OOM vs model) in ~5s instead of ~1min into every config.
+echo "== PREFLIGHT =="
+CUDA_LAUNCH_BLOCKING=1 python - <<'PY' || { echo "PREFLIGHT FAILED: GPU/cuBLAS is broken on this node — not the harness. Relaunch (new node) or use a different CUDA image."; exit 1; }
+import torch
+print("PREFLIGHT torch", torch.__version__, "cuda", torch.version.cuda, "cudnn", torch.backends.cudnn.version())
+print("PREFLIGHT gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
+free, total = torch.cuda.mem_get_info()
+print(f"PREFLIGHT mem free={free/1e9:.1f}GB total={total/1e9:.1f}GB")
+a = torch.randn(4096, 4096, device="cuda", dtype=torch.bfloat16)
+print("PREFLIGHT bf16-GEMM mean =", float((a @ a).float().mean()))
+print("PREFLIGHT OK — GPU/cuBLAS fine; a P-config CUBLAS failure is then OOM or model-specific")
+PY
+echo "== END PREFLIGHT =="
+
 cfg=(); [ -n "$CONFIGS" ] && cfg=(--configurations "$CONFIGS")
 if [ "$MODE" = multigpu ]; then
   python run_multigpu.py --backend "$BACKEND" --manifest /local/replay/manifest.json --out-dir "$OUTPUT_DIR"
