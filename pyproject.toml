@@ -34,6 +34,14 @@ aggregate = [
 gpu = [
     "mlflow>=2.14",
 ]
+# Real DROID capture (policy/capture.py) — reads the open DROID RLDS tfrecords over gs://.
+# Box-only + heavy: both tensorflow-cpu and tensorflow-datasets' array_record dep ship
+# Linux-only wheels, so gate to Linux (capture runs on the GPU box, never on macOS dev).
+# Install on-box with:  uv sync --extra capture
+capture = [
+    "tensorflow-datasets>=4.9; sys_platform == 'linux'",
+    "tensorflow-cpu>=2.16; sys_platform == 'linux'",
+]
 
 [dependency-groups]
 dev = [

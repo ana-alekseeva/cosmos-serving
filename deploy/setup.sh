@@ -26,10 +26,10 @@ export PATH="$HOME/.local/bin:$PATH"
 uv --version
 
 # 2. Create the harness venv and ACTIVATE it (so the rest of this script uses it directly).
-uv sync                                              # creates .venv/ with the harness deps
+uv sync --extra capture                              # .venv/ = harness deps + DROID capture (tfds/tf-cpu)
 # shellcheck disable=SC1091
 set +u; source .venv/bin/activate; set -u            # activate .venv for this script
-uv pip install tensorflow-datasets tensorflow-cpu huggingface_hub   # DROID capture (RLDS tfrecords) + HF CLI
+uv pip install huggingface_hub                       # HF CLI (hf) for the model download
 
 # 2b. Native PyTorch backend (§5.3.1) runs Cosmos3-Nano-Policy-DROID through cosmos-framework —
 #     a heavy, self-contained stack (torch + the 16B model machinery) that wants its OWN env.
