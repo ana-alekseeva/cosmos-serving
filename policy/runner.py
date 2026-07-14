@@ -53,6 +53,7 @@ def run_configuration(
     run_id: str = "cosmos-droid-001",
     model: str | None = None,
     endpoint: str | None = None,
+    checkpoint_dir: str | None = None,
     warmups: int = 25,
     is_baseline: bool = False,
     torchinductor_root: str = "/tmp/torchinductor",
@@ -67,7 +68,8 @@ def run_configuration(
     started = _now()
     cache_dir = set_torchinductor_cache(config, torchinductor_root)
 
-    engine = make_engine(backend, config, model=model, endpoint=endpoint)
+    engine = make_engine(backend, config, model=model, endpoint=endpoint,
+                         checkpoint_dir=checkpoint_dir)
     records: list[LatencyRecord] = []
     error = None
     try:

@@ -26,6 +26,8 @@ from policy.configs import (
     config_by_id,
     ladder,
 )
+from policy import compat
+from policy.compat import UnsupportedTechnique
 from policy.dataset import quality_subset
 from policy.experiment import Experiment
 from policy.matrix import run_matrix
@@ -203,3 +205,53 @@ def test_robolab_subset_gate_passes_for_final():
     assert result["success_drop"] <= result["threshold"]
     assert result["passed"]
     assert 0.0 <= result["candidate_success"] <= 1.0
+
+
+# -- Native PyTorch backend / technique compatibility (§5.3.1 vs §5.3.3) -----------
+def test_pytorch_backend_rejects_vllm_only_techniques():
+    # Cache-DiT (G4/E5) and FP8 (G5/E6) are vLLM-Omni-only (§5.3.3) — not native PyTorch.
+    for cid in ("G4", "G5", "E5", "E6"):
+        c = config_by_id(cid)
+        assert not compat.supported(c, "pytorch")
+        with pytest.raises(UnsupportedTechnique):
+            make_engine("pytorch", c)          # __init__ validates -> refuses
+    # The §5.3.1 rungs ARE native-PyTorch.
+    for cid in ("R0", "R1", "R2", "R3", "R4", "G0", "G1", "G2", "G3", "E0", "E1", "E2", "E3", "E4"):
+        assert compat.supported(config_by_id(cid), "pytorch")
+
+
+def test_vllm_backend_supports_every_config():
+    assert all(compat.supported(c, "vllm") for c in all_configs())
+
+
+def test_cachedit_cudagraph_conflict_is_flagged():
+    # E5/E6 stack CUDA graphs (from E3) + Cache-DiT (E5) — a non-composing pair (§9).
+    assert compat.conflicts(config_by_id("E5"))
+    assert compat.conflicts(config_by_id("E6"))
+    assert not compat.conflicts(config_by_id("E4"))   # no Cache-DiT yet -> no conflict
+
+
+def test_end_to_end_and_lossy_route_to_vllm():
+    # A native-PyTorch waterfall run routes the production-stack configs to vLLM/vLLM-Omni:
+    #   the whole end-to-end (E) ladder + the Cache-DiT/FP8 rungs (§5.3.2/§5.3.3).
+    for cid in ("E0", "E1", "E2", "E3", "E4", "E5", "E6"):
+        assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
+    for cid in ("G4", "G5"):                          # Cache-DiT / FP8 -> vLLM-Omni
+        assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
+    for cid in ("R0", "R4", "G0", "G3"):              # native §5.3.1 reference rungs
+        assert compat.resolve_backend(config_by_id(cid), "pytorch") == "pytorch"
+    for c in all_configs():                           # mock dry-run: everything modeled
+        assert compat.resolve_backend(c, "mock") == "mock"
+
+
+def test_matrix_routes_configs_per_backend(tmp_path):
+    # A pytorch run records which backend each config ran on (E + Cache-DiT/FP8 -> vllm).
+    mp = tmp_path / "replay" / "manifest.json"
+    write_mock_manifest(mp, n=4)
+    exp = Experiment(backend="pytorch", output_dir=str(tmp_path), input_manifest=str(mp),
+                     replay_size=2, warmup_requests=0, wait_between_seconds=0.0,
+                     baseline_at_start_and_end=False, randomize_order=False)
+    status = run_matrix(exp, spawn=False)             # everything fails off-box; routing still recorded
+    cb = status["config_backends"]
+    assert cb["E6"] == "vllm" and cb["G4"] == "vllm" and cb["R0"] == "pytorch"
+    assert not status["skipped"]                      # nothing skipped — all routed to a real backend

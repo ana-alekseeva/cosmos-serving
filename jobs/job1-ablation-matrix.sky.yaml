@@ -32,7 +32,11 @@ envs:
   MODEL: "nvidia/Cosmos3-Nano-Policy-DROID"
   OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/"
   AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
-  BACKEND: "vllm"                   # real backend for the production numbers; "mock" for a dry run
+  BACKEND: "pytorch"                # native §5.3.1 reference for R/G; "mock" for a dry run.
+                                    # The matrix ROUTES per config (policy/compat.resolve_backend):
+                                    # the end-to-end (E) ladder + the Cache-DiT/FP8 rungs run on
+                                    # vLLM/vLLM-Omni (§5.3.2/§5.3.3); R/G rungs run on pytorch.
+                                    # -> BOTH runtimes must be present on the box.
   # HF_TOKEN injected as a secret: `sky jobs launch --secret HF_TOKEN ...`
 
 setup: |
@@ -65,7 +69,13 @@ run: |
     uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
   fi
 
-  # 1) Full single-GPU ablation matrix (R0-R4, G0-G5, E0-E6) with §8 bias controls.
+  # Stage the model checkpoint locally for the native PyTorch path (pytorch loads from
+  # --checkpoint-dir; the routed vLLM/vLLM-Omni configs pull from HF by id). VERIFY layout.
+  [ "${BACKEND}" = "pytorch" ] && huggingface-cli download "${MODEL}" --local-dir /local/model
+
+  # 1) Single-GPU waterfall, each config on its serving backend (policy/compat.resolve_backend):
+  #    R0-R4 + G0-G3 on the native PyTorch reference (§5.3.1); the end-to-end ladder E0-E6 and the
+  #    Generator Cache-DiT/FP8 rungs (G4/G5) on vLLM/vLLM-Omni (§5.3.2/§5.3.3), launched per config.
   #    Each configuration is an isolated subprocess (releases its CUDA context on exit).
   uv run python run_matrix.py \
     --config config/experiment.yaml \

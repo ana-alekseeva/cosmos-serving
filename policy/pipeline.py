@@ -12,10 +12,14 @@ The MOCK backend (modeled per-stage latency, no GPU) lives in policy/mock/engine
 """
 from __future__ import annotations
 
+import warnings
+
+from policy import compat
 from policy.configs import Config
 from policy.dataset import DroidRequest
 from policy.measure import LatencyRecord
 from policy.mock.engine import MockPolicyEngine
+from policy.pytorch_engine import PyTorchPolicyEngine
 
 
 class VLLMPolicyEngine:
@@ -36,6 +40,10 @@ class VLLMPolicyEngine:
         self._server = None
 
     def prepare(self) -> None:
+        compat.validate(self.config, "vllm")                 # §5.3.3: vLLM-Omni technique set
+        for pair, why in compat.conflicts(self.config):      # §9: warn on non-composing pairs
+            names = " + ".join(compat.TECHNIQUES[k][0] for k in pair)
+            warnings.warn(f"{self.config.cid}: {names} — {why}", stacklevel=2)
         if self.endpoint:                   # externally-deployed endpoint: nothing to launch
             return
         # VERIFY: launch vLLM-Omni with this config's engine flags (bench serving contract).
@@ -72,13 +80,17 @@ class VLLMPolicyEngine:
             self._server = None
 
 
-_ENGINES = {"mock": MockPolicyEngine, "vllm": VLLMPolicyEngine}
+BACKENDS = ("mock", "pytorch", "vllm")
 
 
 def make_engine(backend: str, config: Config, *, model: str | None = None,
-                endpoint: str | None = None):
-    if backend not in _ENGINES:
-        raise ValueError(f"unknown backend {backend!r}; expected mock | vllm")
+                endpoint: str | None = None, checkpoint_dir: str | None = None):
+    """Build a policy engine. `pytorch` = native §5.3.1 reference (waterfall, Job 1);
+    `vllm` = vLLM/vLLM-Omni production (§5.3.2/§5.3.3, Job 2); `mock` = modeled, no GPU."""
+    if backend == "mock":
+        return MockPolicyEngine(config, model=model)
+    if backend == "pytorch":
+        return PyTorchPolicyEngine(config, model=model, checkpoint_dir=checkpoint_dir)
     if backend == "vllm":
         return VLLMPolicyEngine(config, model=model, endpoint=endpoint)
-    return MockPolicyEngine(config, model=model)
+    raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")

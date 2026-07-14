@@ -24,12 +24,13 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main(
     configuration: str = typer.Option(..., "--configuration", help="config id, e.g. R0 / G3 / E6"),
-    backend: str = typer.Option("mock", "--backend", help="mock | vllm"),
+    backend: str = typer.Option("mock", "--backend", help="mock | pytorch | vllm"),
     out_dir: Path = typer.Option(Path("results"), "--out-dir"),
     out_subdir: str = typer.Option(None, "--out-subdir", help="override output subdir (default: cid)"),
     run_id: str = typer.Option("cosmos-droid-001", "--run-id"),
     model: str = typer.Option("nvidia/Cosmos3-Nano-Policy-DROID", "--model"),
     endpoint: str = typer.Option(None, "--endpoint", help="vllm: deployed policy endpoint URL"),
+    checkpoint_dir: str = typer.Option("/local/model", "--checkpoint-dir", help="pytorch: local model checkpoint"),
     manifest: Path = typer.Option(Path("policy/mock/manifest.json"), "--manifest"),
     replay_size: int = typer.Option(50, "--replay-size", help="measured requests (= unique obs; no cycling)"),
     warmups: int = typer.Option(50, "--warmups"),
@@ -42,7 +43,7 @@ def main(
     requests = tile_to(load_manifest(manifest), replay_size)
     info = run_configuration(
         config, requests, backend=backend, out_dir=out_dir, run_id=run_id, model=model,
-        endpoint=endpoint, warmups=warmups, is_baseline=is_baseline,
+        endpoint=endpoint, checkpoint_dir=checkpoint_dir, warmups=warmups, is_baseline=is_baseline,
         torchinductor_root=torchinductor_root, out_subdir=out_subdir,
     )
     typer.echo(f"[{configuration}] measured {info['measured']} requests -> {info['dir']}")

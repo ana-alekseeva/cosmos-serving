@@ -21,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 
+from policy import compat
 from policy.configs import END_TO_END, baseline_id
 from policy.experiment import Experiment
 from policy.runner import load_requests, resolve_configs, run_configuration
@@ -39,12 +40,13 @@ def _p50_chunk(summary_path: Path) -> float | None:
     return data.get("percentiles", {}).get("total_chunk_ms", {}).get("p50")
 
 
-def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool) -> None:
+def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool,
+               backend: str) -> None:
     """Run one configuration in its own process (releases CUDA context on exit, §4)."""
     cmd = [
         sys.executable, str(REPO_ROOT / "run_configuration.py"),
         "--configuration", cid,
-        "--backend", exp.backend,
+        "--backend", backend,
         "--out-dir", exp.output_dir,
         "--out-subdir", out_subdir,
         "--run-id", exp.run_id,
@@ -53,6 +55,7 @@ def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool) ->
         "--warmups", str(exp.warmup_requests),
         "--torchinductor-root", exp.torchinductor_root,
         "--replay-size", str(exp.replay_size),
+        "--checkpoint-dir", exp.checkpoint_dir,
     ]
     if exp.endpoint:
         cmd += ["--endpoint", exp.endpoint]
@@ -64,7 +67,21 @@ def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool) ->
 def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
     """Run the full ablation matrix with §8 bias controls. Returns the matrix status dict."""
     requests = load_requests(exp)                       # stage inputs locally before timing (§8)
-    configs = resolve_configs(exp.configurations)
+    # Route each config to its serving backend (§5.3): the end-to-end (E) waterfall — and the
+    # Cache-DiT/FP8 rungs — run on vLLM/vLLM-Omni (§5.3.2/§5.3.3); the R/G native rungs run on
+    # the PyTorch reference (§5.3.1). A mock run keeps everything modeled.
+    all_cfgs = resolve_configs(exp.configurations)
+    cfg_backend = {c.cid: compat.resolve_backend(c, exp.backend) for c in all_cfgs}
+    configs = [c for c in all_cfgs if compat.supported(c, cfg_backend[c.cid])]
+    skipped = [{"cid": c.cid, "reason": compat.skip_reason(c, cfg_backend[c.cid])}
+               for c in all_cfgs if not compat.supported(c, cfg_backend[c.cid])]
+    for s in skipped:
+        print(f"» skip {s['cid']} — {s['reason']}", flush=True)
+    if exp.backend != "mock":
+        routed = sorted({f"{c.cid}->{cfg_backend[c.cid]}" for c in configs
+                         if cfg_backend[c.cid] != exp.backend})
+        if routed:
+            print(f"» routed to production stack: {', '.join(routed)}", flush=True)
     out_dir = Path(exp.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -85,16 +102,18 @@ def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
 
     ran, failed = [], []
     for i, (cid, subdir, is_base) in enumerate(plan):
-        print(f"» [{i + 1}/{len(plan)}] {cid}"
+        backend = cfg_backend[cid]
+        print(f"» [{i + 1}/{len(plan)}] {cid} [{backend}]"
               f"{' (baseline)' if is_base else ''} -> {out_dir / subdir}", flush=True)
         try:
             if spawn:
-                _spawn_one(cid, exp, subdir, is_base)
+                _spawn_one(cid, exp, subdir, is_base, backend)
             else:                                       # in-process (tests / no subprocess)
                 from policy.configs import config_by_id
-                run_configuration(config_by_id(cid), requests, backend=exp.backend,
+                run_configuration(config_by_id(cid), requests, backend=backend,
                                   out_dir=exp.output_dir, run_id=exp.run_id, model=exp.model,
-                                  endpoint=exp.endpoint, warmups=exp.warmup_requests,
+                                  endpoint=exp.endpoint, checkpoint_dir=exp.checkpoint_dir,
+                                  warmups=exp.warmup_requests,
                                   is_baseline=is_base, torchinductor_root=exp.torchinductor_root,
                                   out_subdir=subdir)
             ran.append(subdir)
@@ -104,12 +123,13 @@ def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
         if i < len(plan) - 1 and exp.wait_between_seconds:
             time.sleep(exp.wait_between_seconds)        # let the GPU settle between configs (§8)
 
-    status = _finish(exp, out_dir, base_cid, have_base, ran, failed)
+    status = _finish(exp, out_dir, base_cid, have_base, ran, failed, skipped)
+    status["config_backends"] = {c.cid: cfg_backend[c.cid] for c in configs}   # which ran where
     (out_dir / "matrix_status.json").write_text(json.dumps(status, indent=2))
     return status
 
 
-def _finish(exp, out_dir, base_cid, have_base, ran, failed) -> dict:
+def _finish(exp, out_dir, base_cid, have_base, ran, failed, skipped) -> dict:
     drift = None
     rejected = False
     if exp.baseline_at_start_and_end and have_base:
@@ -125,6 +145,6 @@ def _finish(exp, out_dir, base_cid, have_base, ran, failed) -> dict:
                   f"-> {'REJECT' if rejected else 'accept'}", flush=True)
     return {
         "run_id": exp.run_id, "backend": exp.backend, "output_dir": str(out_dir),
-        "configurations_run": ran, "failed": failed,
+        "configurations_run": ran, "failed": failed, "skipped": skipped,
         "baseline_drift": drift, "rejected": rejected,
     }
