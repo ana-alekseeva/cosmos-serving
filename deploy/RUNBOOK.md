@@ -215,5 +215,5 @@ npa workbench cosmos -p eu-north1 -n cosmos-policy-optimized teardown --yes
 | Every eval request 401s | Endpoint deployed with `--auth token`. Redeploy with `AUTH=none`. |
 | Eval job can't pull `nvcr.io/nvidia/isaac-lab:2.3.2` | NGC may need auth — add `--registry-secret <ngc-secret>` to `nebius ai job create`. |
 | Eval job: RoboLab clone fails | `NVLabs/RoboLab@main` access — make it reachable (public or token). |
-| Eval job: RoboLab import/install errors | Wrong Isaac interpreter — pass `--env ROBOLAB_PYTHON=<isaac python>` (e.g. `isaaclab.sh -p`). |
+| Eval job: `python: command not found` / RoboLab import errors | The isaac-lab image has no bare `python`; the script auto-detects `/isaac-sim/python.sh`. Override with `--env ROBOLAB_PYTHON=<path>` if needed. |
 | Records landed in the Job 2 bucket | `OUTPUT_URI_EVAL` unset — set it in `.env` (defaults to the robolab bucket otherwise). |

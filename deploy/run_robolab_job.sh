@@ -27,7 +27,13 @@ export PATH="$HOME/.local/bin:$PATH"
 # destination (cosmos3-ablation-results/); using it here would mix eval records into Job 2's tree.
 : "${OUTPUT_URI_EVAL:=s3://serverless-challenge/robolab-eval-results/subset/}"
 : "${AWS_ENDPOINT_URL:=https://storage.eu-north1.nebius.cloud}"
-: "${ROBOLAB_PYTHON:=python}"                 # VERIFY: the image's Isaac interpreter (isaaclab.sh -p vs python)
+# The image's Isaac interpreter. The isaac-lab image has NO bare `python`; npa's isaac-lab
+# tooling uses /isaac-sim/python.sh (Isaac Sim kit python, which is where isaaclab lives).
+# Respect an explicit ROBOLAB_PYTHON; else prefer the Isaac python, then fall back off-image.
+if [ -z "${ROBOLAB_PYTHON:-}" ]; then
+  if [ -x /isaac-sim/python.sh ]; then ROBOLAB_PYTHON=/isaac-sim/python.sh
+  else ROBOLAB_PYTHON="$(command -v python3 || command -v python || echo python3)"; fi
+fi
 
 WORK=/work; mkdir -p "$WORK"; cd "$WORK"
 rm -rf cosmos-serving && git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" cosmos-serving
