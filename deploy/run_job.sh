@@ -69,12 +69,17 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 # venv (project-scoped `uv sync` is immune; setup.sh dodges it with `unset VIRTUAL_ENV`).
 PYMODEL="$FRAMEWORK/.venv/bin/python"
 if [ "$BACKEND" = vllm ]; then
-  # vLLM image (deploy/Dockerfile.vllm): the vllm group ships vllm==0.19.1 + torch 2.10.0 (the
-  # PyPI cu12.8 build with its own bundled CUDA wheels) — the cu130 cuBLAS overrides do NOT apply.
-  # NO --all-extras: the extras drag in an ABI-mismatched torchaudio that crashes `import vllm`.
-  # vLLM-Omni is a separate PyPI package the lock leaves out; the sync prunes it, so reinstall.
+  # vLLM image (deploy/Dockerfile.vllm): vllm group, NO --all-extras (extras drag in extra ABI
+  # breakage). After the sync, re-apply everything it prunes/reinstalls (same rule as native):
+  #   * vllm-omni — separate PyPI package, not in the lock;
+  #   * UNINSTALL torchaudio — the lock's build is cu12-linked but this venv's torch resolves to
+  #     cu13x (torch is index-mapped globally), and transformers guards it only with
+  #     `except ImportError`: broken -> OSError crash on the vllm CLI path, absent -> clean skip;
+  #   * cuBLAS 13.1.1.3 — cu13x torch means the H200+r580 13.1.0.3 GEMM bug applies here too.
   ( cd "$FRAMEWORK" && uv sync --group vllm )
-  uv pip install -q --python "$PYMODEL" vllm-omni
+  uv pip install -q --python "$PYMODEL" vllm-omni \
+      "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
+  uv pip uninstall -q --python "$PYMODEL" torchaudio 2>/dev/null || true
   # vLLM's server-side torch profiler flushes Chrome traces here on /start_profile (§ Job 2).
   export VLLM_TORCH_PROFILER_DIR="${VLLM_TORCH_PROFILER_DIR:-/local/vllm_traces}"
   mkdir -p "$VLLM_TORCH_PROFILER_DIR"

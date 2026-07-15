@@ -2,8 +2,8 @@
 #
 # cosmos-framework declares `vllm` and `cu130` as CONFLICTING uv groups, so this is the SEPARATE
 # production image (E ladder / E0,E6 validation); the native P0-P3 ladder runs on deploy/Dockerfile.
-# The vllm group ships vllm==0.19.1 + torch==2.10.0 (the PyPI cu12.8 build with its own bundled
-# CUDA wheels — none of the cu130 cuBLAS overrides the native image needs apply here).
+# The vllm group ships vllm==0.19.1 + torch==2.10.0 — which resolves to a cu13x build (torch is
+# source-mapped to the pytorch index globally), so the cu13 cuBLAS override DOES apply here.
 # vLLM-Omni is NOT in the vllm group; it is a separate PyPI package (`vllm-omni`) that provides
 # the omni/policy serve path (`vllm serve --omni` — VERIFY the entrypoint on-box).
 #
@@ -40,14 +40,25 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 #    vllm group's torch (import vllm loads torchaudio opportunistically -> OSError libtorchaudio),
 #    and the serving/client path needs none of them. NB: NEVER `uv run` after the pip installs —
 #    it auto-syncs back to the lock and removes them (use .venv/bin/python directly).
+#    torchaudio must be UNINSTALLED, not just unused: the vllm group's lock ships a cu12-linked
+#    build (needs libcudart.so.12), and transformers>=5 (pulled by vllm-omni) imports torchaudio
+#    on the `vllm` CLI path guarded only by `except ImportError` — a broken install raises OSError
+#    from ctypes and crashes; an absent one is handled cleanly.
+#    NB: `[tool.uv.sources]` maps torch to the pytorch index GLOBALLY, so even this group's
+#    `torch==2.10.0` resolves to a cu13x flavor (that is WHY no libcudart.so.12 exists here) —
+#    which means the H200+r580 cuBLAS bug applies to THIS venv too: override the broken
+#    13.1.0.3 pin with 13.1.1.3 exactly like the native image.
 RUN cd /opt/cosmos-framework \
     && uv sync --group vllm \
     && uv pip install vllm-omni \
     && uv pip install -e /opt/cosmos-serving \
+    && uv pip uninstall torchaudio \
+    && uv pip install "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96" \
     && py=/opt/cosmos-framework/.venv/bin/python \
     # import smoke: a missing dep fails the BUILD, not a paid GPU job
     && $py -c 'import vllm, policy; print("import smoke OK, vllm", vllm.__version__)' \
-    && /opt/cosmos-framework/.venv/bin/vllm --help >/dev/null && echo "vllm CLI OK"
+    && /opt/cosmos-framework/.venv/bin/vllm --help >/dev/null && echo "vllm CLI OK" \
+    && $py -c 'import torch; print("torch", torch.__version__, "toolkit", torch.version.cuda)'
 
 RUN mkdir -p /local/model /local/replay
 WORKDIR /opt/cosmos-serving
