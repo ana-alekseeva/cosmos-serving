@@ -71,8 +71,9 @@ PYMODEL="$FRAMEWORK/.venv/bin/python"
 if [ "$BACKEND" = vllm ]; then
   # vLLM image (deploy/Dockerfile.vllm): the vllm group ships vllm==0.19.1 + torch 2.10.0 (the
   # PyPI cu12.8 build with its own bundled CUDA wheels) — the cu130 cuBLAS overrides do NOT apply.
+  # NO --all-extras: the extras drag in an ABI-mismatched torchaudio that crashes `import vllm`.
   # vLLM-Omni is a separate PyPI package the lock leaves out; the sync prunes it, so reinstall.
-  ( cd "$FRAMEWORK" && uv sync --all-extras --group vllm )
+  ( cd "$FRAMEWORK" && uv sync --group vllm )
   uv pip install -q --python "$PYMODEL" vllm-omni
   # vLLM's server-side torch profiler flushes Chrome traces here on /start_profile (§ Job 2).
   export VLLM_TORCH_PROFILER_DIR="${VLLM_TORCH_PROFILER_DIR:-/local/vllm_traces}"

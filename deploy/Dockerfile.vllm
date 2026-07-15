@@ -36,10 +36,12 @@ RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_R
 RUN cd /opt/cosmos-serving && uv sync --extra capture
 
 # 2) Model venv: the vllm group (vllm==0.19.1 + torch 2.10.0 cu128) + vllm-omni from PyPI + this
-#    harness editable. NB: NEVER `uv run` after the pip installs — it auto-syncs back to the lock
-#    and removes them (use .venv/bin/python directly).
+#    harness editable. NO --all-extras: the extras drag in a torchaudio whose ABI mismatches the
+#    vllm group's torch (import vllm loads torchaudio opportunistically -> OSError libtorchaudio),
+#    and the serving/client path needs none of them. NB: NEVER `uv run` after the pip installs —
+#    it auto-syncs back to the lock and removes them (use .venv/bin/python directly).
 RUN cd /opt/cosmos-framework \
-    && uv sync --all-extras --group vllm \
+    && uv sync --group vllm \
     && uv pip install vllm-omni \
     && uv pip install -e /opt/cosmos-serving \
     && py=/opt/cosmos-framework/.venv/bin/python \
