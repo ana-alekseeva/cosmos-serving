@@ -96,6 +96,10 @@ per config). One serverless endpoint = one engine config, so the workbench path 
   torchrun-wrapped (built for distributed training), so it's a poor fit for the ablation orchestrator.
 - The `*.sky.yaml` files here are optional **raw-SkyPilot** task specs (RoboLab on RT-core GPUs,
   etc.), not npa commands — the npa path above is primary.
+- Aggregation (spec §4 Job 5) has NO cloud job — it's CPU-only, so [aggregate-local.sh](aggregate-local.sh)
+  runs it locally: pulls the raw S3 trees (Job 1 + Job 2 production), re-runs `aggregate.py` over the
+  merged results, uploads `aggregate/` back. `NO_UPLOAD=1` to inspect locally; `INPUT_URIS=""` to skip
+  the pull and aggregate an existing `results/` dir as-is.
 
 RoboLab (Jobs 3-4) still needs a different stack — Isaac Sim + Isaac Lab on an RT-core GPU
 (`gpu-l40s-d` / `gpu-rtx6000`, not H200) — see [job3-robolab-subset.sky.yaml](job3-robolab-subset.sky.yaml).
