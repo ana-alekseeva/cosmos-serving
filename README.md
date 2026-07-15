@@ -156,8 +156,10 @@ nebius ai job create --name cosmos-job1-native --parent-id "$PROJECT_ID" \
   --env HF_TOKEN="$HF_TOKEN"
 ```
 `--timeout` is a *cap* (default 24h) — you're billed for actual runtime (~1–2 h for Job 1). The other jobs are
-the same shape with different `--preset`/`--env` (and the vLLM image): **1b** `MODE=multigpu` on `2gpu-…`;
-**2** `BACKEND=vllm CONFIGS=E0,E6`; **2b** adds `TENSOR_PARALLEL_SIZE=2 PARALLEL=cfg` on 2 GPUs.
+the same shape with different `--preset`/`--env` (and the vLLM image): **2** `BACKEND=vllm CONFIGS=E0,E6`;
+**1b** `MODE=multigpu`; **2b** adds `TENSOR_PARALLEL_SIZE=2 PARALLEL=cfg`. ⚠ H200 has NO 2-GPU preset —
+only `1gpu-16vcpu-200gb` and `8gpu-128vcpu-1600gb` (verified via `nebius compute platform list`), so the
+multi-GPU jobs rent the 8-GPU preset and leave the surplus GPUs idle (or set `TENSOR_PARALLEL_SIZE=8`).
 
 ## Create Nebius resources with the workbench (`npa`)
 

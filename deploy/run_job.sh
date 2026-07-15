@@ -71,18 +71,29 @@ PYMODEL="$FRAMEWORK/.venv/bin/python"
 if [ "$BACKEND" = vllm ]; then
   # vLLM image (deploy/Dockerfile.vllm): vllm group, NO --all-extras (extras drag in extra ABI
   # breakage). After the sync, re-apply everything it prunes/reinstalls (same rule as native):
-  #   * vllm-omni — separate PyPI package, not in the lock;
-  #   * UNINSTALL torchaudio — the lock's build is cu12-linked but this venv's torch resolves to
-  #     cu13x (torch is index-mapped globally), and transformers guards it only with
-  #     `except ImportError`: broken -> OSError crash on the vllm CLI path, absent -> clean skip;
-  #   * cuBLAS 13.1.1.3 — cu13x torch means the H200+r580 13.1.0.3 GEMM bug applies here too.
+  #   * torch -> the PyPI cu128 build. vllm 0.19.1's PyPI wheels are CUDA-12 binaries
+  #     (vllm/_C.abi3.so NEEDs libcudart.so.12), but the framework maps torch to the cu13
+  #     pytorch index, so the sync leaves a cu13-only venv where `import vllm._C` dies on any
+  #     GPU node ("libcudart.so.12: cannot open shared object file"). PyPI torch==2.10.0 is the
+  #     cu128 flavor vllm was built against, and (unlike pytorch-index wheels) it declares its
+  #     nvidia-*-cu12 dep tree, which brings libcudart.so.12 + cuBLAS 12.8.4.1 (known-good on
+  #     H200+r580). --reinstall-package forces the flavor swap (PEP440: ==2.10.0 is already
+  #     "satisfied" by 2.10.0+cu130); --index-url keeps uv off the framework's index mapping.
+  #   * vllm-omni — separate PyPI package, not in the lock; pinned 0.20.0 (0.24 force-upgrades
+  #     transformers>=5.5 past what the lock resolved) — lockstep with deploy/Dockerfile.vllm.
+  #   * UNINSTALL torchaudio — transformers imports it opportunistically guarded only by
+  #     `except ImportError`: broken -> OSError crash on the vllm CLI path, absent -> clean skip.
+  # NB: do NOT add the cu13 nvidia-cublas/nvidia-cuda-runtime pins here — those versions are
+  # torch 2.13+cu130's pins and make uv upgrade torch to 2.13.0+cu130 to match (that silent
+  # jump is exactly what a failed Job 2 preflight showed alongside the libcudart error).
   ( cd "$FRAMEWORK" && uv sync --group vllm )
-  # vllm-omni pinned to 0.20.0 to pair with vllm==0.19.1 (0.24 force-upgrades transformers>=5.5
-  # past what the lock resolved) — keep in lockstep with deploy/Dockerfile.vllm.
-  uv pip install -q --python "$PYMODEL" "vllm-omni==0.20.0" \
-      "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
+  uv pip install -q --python "$PYMODEL" --index-url https://pypi.org/simple \
+      --reinstall-package torch --reinstall-package torchvision \
+      "torch==2.10.0" "torchvision==0.25.0" "vllm-omni==0.20.0"
   uv pip uninstall -q --python "$PYMODEL" torchaudio 2>/dev/null || true
-  # vLLM's server-side torch profiler flushes Chrome traces here on /start_profile (§ Job 2).
+  # GPU-op trace dir — OUR knob, not vLLM's: the env var was removed from vllm 0.19.1;
+  # policy/serving.py translates it into the --profiler-config engine flag at server launch
+  # (per-config subdirs via policy/pipeline.py). Traces upload to ${OUTPUT_URI}raw/traces/.
   export VLLM_TORCH_PROFILER_DIR="${VLLM_TORCH_PROFILER_DIR:-/local/vllm_traces}"
   mkdir -p "$VLLM_TORCH_PROFILER_DIR"
 else
@@ -103,12 +114,15 @@ export CUDA_CACHE_PATH=/local/.nv_cache; mkdir -p "$CUDA_CACHE_PATH"
 cat > /tmp/gemm_probe.py <<'PY'
 import sys, torch
 from importlib.metadata import version, PackageNotFoundError
-def v(p):
-    try: return version(p)
-    except PackageNotFoundError: return "absent"
+def v(*names):  # native venv = cu13 wheels (unsuffixed cublas/runtime); vllm venv = -cu12 ones
+    for p in names:
+        try: return f"{p}=={version(p)}"
+        except PackageNotFoundError: pass
+    return "absent"
 print("PREFLIGHT torch", torch.__version__, "toolkit_cuda", torch.version.cuda, "cudnn", torch.backends.cudnn.version())
-print("PREFLIGHT wheels cublas", v("nvidia-cublas"), "cudnn", v("nvidia-cudnn-cu13"),
-      "cuda_runtime", v("nvidia-cuda-runtime"))
+print("PREFLIGHT wheels", v("nvidia-cublas", "nvidia-cublas-cu12"),
+      v("nvidia-cudnn-cu13", "nvidia-cudnn-cu12"),
+      v("nvidia-cuda-runtime", "nvidia-cuda-runtime-cu12"))
 print("PREFLIGHT gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
 ok = True
 for dt in ("float32", "float16", "bfloat16"):
@@ -158,8 +172,14 @@ PY
 echo "== PREFLIGHT =="
 df -h / /local /root/.cache 2>/dev/null | sed 's/^/PREFLIGHT df /'
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/PREFLIGHT smi /'
+# Image identity: a REUSED tag (e.g. :v1 pushed twice) is served stale from the node's image
+# cache (IfNotPresent) — this line is how you catch it. Compare against the framework commit
+# your local image reports; if they differ, the node ran an old build: push a FRESH tag.
+echo "PREFLIGHT framework $(git -C "$FRAMEWORK" log -1 --format='%h %cs %s' 2>/dev/null || echo unknown)"
 rc=0; "$PYMODEL" /tmp/gemm_probe.py || rc=$?
-if [ "$rc" -ne 0 ]; then
+# The escalation below is cu13-only (preloads libcublas.so.13): the vllm venv is the cu128
+# stack (cuBLAS 12.8.4.1, known-good) — a GEMM failure there is a node problem, go to abort.
+if [ "$rc" -ne 0 ] && [ "$BACKEND" != vllm ]; then
   echo "PREFLIGHT: GEMM failed with torch's patched cuBLAS pin -> escalating to newest nvidia-cublas via LD_PRELOAD"
   uv pip install -q --python "$PYMODEL" --target /local/cublas-alt "nvidia-cublas==${CUBLAS_ALT:-13.6.0.2}"
   ALT=/local/cublas-alt/nvidia/cu13/lib
@@ -182,7 +202,14 @@ irc=0
 if [ "$rc" -eq 0 ]; then
   if [ "$BACKEND" = vllm ]; then
     mods="import vllm, policy.runner, policy.serving"
-    "$FRAMEWORK/.venv/bin/vllm" --help >/dev/null 2>&1 || { echo "PREFLIGHT: vllm CLI missing"; irc=1; }
+    # Don't swallow the error: "CLI missing" vs "CLI crashes on import" need different fixes
+    # (absent binary -> wrong image; ImportError/OSError -> broken venv, e.g. the torchaudio ABI
+    # crash). Print the tail of the real traceback.
+    "$FRAMEWORK/.venv/bin/vllm" --help >/dev/null 2>/tmp/vllm_cli_err || {
+      echo "PREFLIGHT: vllm CLI failed — last lines:"
+      tail -15 /tmp/vllm_cli_err | sed 's/^/PREFLIGHT vllm-cli /'
+      irc=1
+    }
   else
     mods="import iopath, policy.runner, policy.pytorch_engine, \
 cosmos_framework.inference.args, cosmos_framework.scripts.action_policy_server_robolab, \
