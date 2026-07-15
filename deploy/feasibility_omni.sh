@@ -59,7 +59,17 @@ if ! command -v gcc >/dev/null || [ ! -f "/usr/include/python${PYV}/Python.h" ];
 fi
 "$PY" -c "import triton; triton.runtime.driver.active.get_current_device()" \
   || fail S2 "triton JIT probe (toolchain present but compile still failing — see error above)"
-pass S2 "both CLIs run + triton JIT probe"
+# flashinfer JIT-compiles its sampling/attention kernels too — it needs ninja (pip wheel is
+# fine; .venv/bin goes on PATH for the server) and nvcc. Without nvcc, disable the flashinfer
+# sampler rather than dying in the post-load sampler warmup; vllm falls back to native sampling.
+uv pip install --python "$PY" -q ninja || fail S2 "ninja install"
+export PATH="$WORK/.venv/bin:$PATH"
+[ -d /usr/local/cuda/bin ] && export PATH="/usr/local/cuda/bin:$PATH"
+if ! command -v nvcc >/dev/null; then
+  echo "S2 WARN: no nvcc on this box — disabling the flashinfer sampler (VLLM_USE_FLASHINFER_SAMPLER=0)"
+  export VLLM_USE_FLASHINFER_SAMPLER=0
+fi
+pass S2 "both CLIs run + triton JIT probe + ninja"
 
 # --- S3: serve the checkpoint (downloads ~30GB on first run) --------------------------
 echo "S3 launching: vllm-omni serve $MODEL (log: $WORK/serve.log)"
