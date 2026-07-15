@@ -61,8 +61,10 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 RUN uv venv /opt/omni/.venv --python 3.12 \
     # cosmos-guardrail: Cosmos3's guardrail init hard-requires it (NVIDIA Open Model License).
     # iopath: the vendored cosmos_framework action-transform import chain needs it (pure-python).
+    # fa3-fwd: EXPLICIT so the FLASH_ATTN backend keeps dispatching FlashAttention-3 (it
+    # silently falls back to FA2 if no FA3 wheel imports — verified FA3 active on H100).
     && uv pip install --python /opt/omni/.venv/bin/python \
-         "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail iopath ninja \
+         "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail fa3-fwd iopath ninja \
     && uv pip install --python /opt/omni/.venv/bin/python -e /opt/cosmos-serving \
     && py=/opt/omni/.venv/bin/python \
     # import smoke: a missing dep fails the BUILD, not a paid GPU job
