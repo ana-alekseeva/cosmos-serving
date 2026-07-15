@@ -19,6 +19,16 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 GPU_TYPE="${GPU_TYPE:-gpu-h200-sxm}"               # `npa`/nebius platform id
 GPU_PRESET="${GPU_PRESET:-1gpu-16vcpu-200gb}"      # 1-GPU final; 8gpu-… for CFG-Parallel scaling
 SUBNET_ID="${SUBNET_ID:-}"                         # required if the project has multiple subnets
+# AUTH=none for eval endpoints: neither the harness HTTP client (policy/serving.py) nor
+# RoboLab's OpenPI websocket client sends an Authorization header, so `token` 401s every
+# eval request. Default stays token for anything longer-lived; tear eval endpoints down.
+AUTH="${AUTH:-token}"                              # token | none (npa deploy --auth)
+# npa's DEFAULT image lives in the shared workbench registry (e00cm0vc6t09m0z5gw), which this
+# tenant CANNOT pull from (verified 2026-07-15: `denied` for both the serverless service and
+# our IAM user). Build npa-cosmos from the npa checkout's Dockerfile (public nvidia/cuda base),
+# push to OUR registry (cosmos-droid, e00k6drmprp0pm6zcf) with a FRESH tag (never reuse tags —
+# the cluster serves stale layers on reused tags), and pass it here.
+IMAGE="${IMAGE:-}"                                 # e.g. cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf/npa-cosmos:1.0.9-local.1
 : "${HF_TOKEN:?export HF_TOKEN=... (Cosmos3-Nano-Policy-DROID license accepted on HF)}"
 
 # The final end-to-end optimizations (E6) as non-secret container env vars (deploy has NO
@@ -30,6 +40,7 @@ if [ "$MODE" = "optimized" ]; then
 fi
 [ -n "$PROJECT_ID" ] && ENV_ARGS+=(--project-id "$PROJECT_ID")
 [ -n "$SUBNET_ID" ]  && ENV_ARGS+=(--subnet-id "$SUBNET_ID")
+[ -n "$IMAGE" ]      && ENV_ARGS+=(--image "$IMAGE")
 
 echo "==> npa workbench cosmos deploy ($MODE) -> serverless AI endpoint"
 # Group opts (-p/-n) go before the subcommand. --auto-serve (default) loads the model after a
@@ -37,7 +48,7 @@ echo "==> npa workbench cosmos deploy ($MODE) -> serverless AI endpoint"
 npa workbench cosmos -p "$PROJECT_ALIAS" -n "$NAME" deploy \
   --runtime serverless --model "$MODEL" \
   --gpu-type "$GPU_TYPE" --gpu-preset "$GPU_PRESET" \
-  "${ENV_ARGS[@]}" --auth token --wait --output json
+  "${ENV_ARGS[@]}" --auth "$AUTH" --wait --output json
 
 npa workbench cosmos -p "$PROJECT_ALIAS" -n "$NAME" status --output json   # expect healthy
 

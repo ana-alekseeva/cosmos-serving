@@ -1,0 +1,53 @@
+# Stratified 18-task RoboLab subset (§5) -> real RoboLab task names (NVLabs/RoboLab
+# benchmark, 120 tasks; catalog: robolab/tasks/_metadata/task_metadata.json).
+#
+# WHY THESE 18 — the gate exists to catch FP8/Cache-DiT *action* degradation against the
+# baseline within a <1 h eval budget (two parallel L40S jobs, one endpoint each), so:
+#
+#   * Capability axis = RoboLab's OWN attribute families (its task_report.txt): visual
+#     (color/semantics/size grounding), relational (spatial/conjunction/counting),
+#     procedural (stacking/reorientation/insertion). The benchmark has no articulated or
+#     true tool-use tasks, so the spec's placeholder groups could not map honestly.
+#   * Difficulty = the metadata's complexity proxies (num_sequential_stages,
+#     num_atomic_conditions, clutter), since RoboLab publishes no difficulty labels.
+#   * Precision-critical motor tasks are over-weighted (stacking, insertion,
+#     reorientation, relative placement): small action noise flips their success first.
+#   * Reasoner-sensitive instructions included (vague / and / or / ordered "then"):
+#     they catch conditioning corruption, not just motor drift; "then" tasks are the
+#     sharpest probe for cross-chunk state drift. Always use the DEFAULT instruction
+#     variant — mixing variants across endpoints would confound the comparison.
+#   * Budget: every episode cap <=90 s (sum ~1110 s/set); 10 episodes run as parallel
+#     envs (--num-envs), so wall time/task ~ one cap + scene load. The 240-300 s
+#     long-horizon accumulation tasks are deliberately excluded — that coverage returns
+#     in Job 4 (full benchmark).
+#   * No likely floor/ceiling tasks: with 10 episodes/task, a ~0% or ~100% baseline task
+#     cannot resolve a drop; the 9-11-subtask monsters (ClearOrganicObjects, CleanUpToys)
+#     are excluded. Swap candidates if a task floors on the first run: GrabAFruitTask,
+#     WhiteMugInCenterOfTableTask, UnstackRubiksCubeTask, FruitsOnPlate3Task.
+#
+# Keys are policy/dataset.quality_subset() slot ids; policy/robolab_runner.load_task_map()
+# refuses unfilled or unknown slots.
+
+# visual — language/vision grounding, single->multi object, clutter at the hard end
+RoboLab-visual-easy-0: BananaInBowlTask               # canonical single-object baseline (50s)
+RoboLab-visual-easy-1: SmallerObjectButterInBinTask   # size grounding, trivial motor (30s)
+RoboLab-visual-medium-0: RedDishesInBinTask           # color+semantics, 2 objects (60s)
+RoboLab-visual-medium-1: RecycleCartonTask            # vague instruction — reasoner probe (90s)
+RoboLab-visual-hard-0: ClutterPumpkinTask             # target under heavy clutter (90s)
+RoboLab-visual-hard-1: AnimalsInBinTask               # 2 identical targets amid distractors (90s)
+
+# relational — spatial / logical structure in the instruction
+RoboLab-relational-easy-0: MustardInLeftBinTask       # left/right grounding (30s)
+RoboLab-relational-easy-1: RubiksCubeOrBananaTask     # disjunction (30s)
+RoboLab-relational-medium-0: RubiksCubeLeftOfBowlTask # placement relative to a reference (30s)
+RoboLab-relational-medium-1: RubiksCubeAndBananaTask  # conjunction, two placements (60s)
+RoboLab-relational-hard-0: BananaThenRubiksCubeTask   # 2 ordered stages — sequencing (60s)
+RoboLab-relational-hard-1: RubiksCubeThenBananaTask   # mirrored order — controls object bias (60s)
+
+# procedural — precision motor control; the FP8/Cache-DiT canaries
+RoboLab-procedural-easy-0: StackYellowOnRedTask       # minimal stack — cheapest precision probe (60s)
+RoboLab-procedural-easy-1: MarkerInMugTask            # insertion, tight tolerance (40s)
+RoboLab-procedural-medium-0: ReorientAllMugsTask      # fine wrist-orientation control x3 (90s)
+RoboLab-procedural-medium-1: UnstackRubiksCubeTask    # controlled de-stacking (90s)
+RoboLab-procedural-hard-0: BlockStackingSpecifiedOrderTask  # 3 ordered stages — most regression-sensitive (90s)
+RoboLab-procedural-hard-1: Stack3RubiksCubeTask       # 2-stage tower — compounding placement error (60s)

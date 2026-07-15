@@ -1,9 +1,13 @@
 # Job 3 — RoboLab subset evaluation (specification_revised.txt §4, §5).
 #
-# INFRA PROVISIONING ONLY. The quality gate for the lossy techniques (Cache-DiT, FP8): run the
-# stratified 18-task subset (3 capability groups x 3 difficulty x 2 tasks, 10 episodes each,
-# §5) and REJECT any optimization that regresses task success beyond SUCCESS_DROP_THRESHOLD.
-# Runs three configurations (§4): baseline, final optimized PyTorch, final production.
+# The quality gate for the lossy techniques (Cache-DiT, FP8): run the stratified 18-task
+# subset (3 capability groups x 3 difficulty x 2 tasks, 10 episodes each, §5) and REJECT any
+# optimization that regresses task success beyond SUCCESS_DROP_THRESHOLD. Real rollouts:
+# policy/robolab_runner.py drives the RoboLab runner per task against each endpoint's OpenPI
+# websocket route and run_robolab.py gates the parsed success rates. Prerequisite: fill the
+# 18 slots in config/robolab_tasks.yaml with real RoboLab task names (the run refuses to
+# start otherwise). Runs three configurations (§4): baseline, final optimized PyTorch,
+# final production.
 #
 # HARDWARE — a DIFFERENT stack than the ablation. RoboLab needs Isaac Sim 5.x + Isaac Lab on an
 # RT-core GPU (>=48 GB): a Nebius RT-core platform (gpu-l40s-d / RTX PRO 6000), NOT gpu-h200-sxm
@@ -11,10 +15,18 @@
 # endpoint so rendering/physics don't compete with inference on the same GPU (§4). Every
 # `# VERIFY` must be confirmed on-box before the numbers are trustworthy.
 #
-#   sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-subset \
-#     --env COSMOS_ENDPOINT_BASELINE=https://<baseline> \
-#     --env COSMOS_ENDPOINT_OPTIMIZED=https://<optimized> \
-#     --env OUTPUT_URI=s3://serverless-challenge/robolab-eval-results/subset/
+# TWO PARALLEL JOBS, one endpoint each (keeps the eval under the ~1 h wall budget: each
+# task's 10 episodes run as parallel envs, and the endpoints don't queue behind each other):
+#
+#   sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e0 \
+#     --env ROLE=baseline  --env COSMOS_ENDPOINT_BASELINE=https://<baseline>
+#   sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e6 \
+#     --env ROLE=optimized --env COSMOS_ENDPOINT_OPTIMIZED=https://<optimized>
+#
+# Gate AFTER both finish (anywhere — records resume, no simulator needed):
+#   aws s3 sync "${OUTPUT_URI}raw/robolab/" results/robolab/ --endpoint-url $AWS_ENDPOINT_URL
+#   uv run python run_robolab.py --backend vllm --side both --robolab-root RoboLab \
+#     --endpoint-baseline https://<baseline> --endpoint-candidate https://<optimized>
 
 name: robolab-subset
 
@@ -34,7 +46,9 @@ envs:
   ROBOLAB_REPO: "https://github.com/NVLabs/RoboLab.git"             # VERIFY ref + access
   ROBOLAB_REF: "main"
   MODE: "subset"                    # 18-task stratified subset (§5)
-  EPISODES_PER_TASK: "10"
+  ROLE: "baseline"                  # baseline | optimized — ONE endpoint per job (parallel L40S)
+  EPISODES_PER_TASK: "10"           # run as parallel sim envs (--num-envs); VERIFY VRAM fits
+                                    # 10 envs on 48 GB (RoboLab docs/env_vram_size_guide.md)
   # Endpoints to score. Baseline = plain deploy; optimized = jobs/deploy-optimized.sh; the
   # "final production" config is the optimized vLLM-Omni endpoint (same as optimized here).
   COSMOS_ENDPOINT_BASELINE: ""      # VERIFY URL
@@ -49,29 +63,38 @@ setup: |
   export PATH="$HOME/.local/bin:$PATH"
   rm -rf cosmos-serving && git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" cosmos-serving
   cd cosmos-serving && uv sync
-  # RoboLab (IsaacLab manipulation). VERIFY the install (uv sync vs pip -e .) + assets download.
+  # RoboLab (Isaac Lab manipulation) — installed into the IMAGE's Isaac python (kit env),
+  # not our uv venv: the runner subprocess uses ROBOLAB_PYTHON. VERIFY on-box: the image's
+  # interpreter (isaaclab.sh -p vs plain python), that pip -e resolves against the
+  # preinstalled Isaac Lab, and the first-run asset download.
   rm -rf RoboLab && git clone --depth 1 --branch "${ROBOLAB_REF}" "${ROBOLAB_REPO}" RoboLab
+  "${ROBOLAB_PYTHON:-python}" -m pip install -e ./RoboLab
 
 run: |
   set -euo pipefail
   export PATH="$HOME/.local/bin:$PATH"
   cd cosmos-serving && nvidia-smi
+  # One endpoint per job (ROLE): the two jobs run in parallel and the gate merges records.
+  case "${ROLE}" in
+    baseline)  SIDE=baseline;  : "${COSMOS_ENDPOINT_BASELINE:?deploy the baseline endpoint first (jobs/deploy-optimized.sh MODE=baseline)}" ;;
+    optimized) SIDE=candidate; : "${COSMOS_ENDPOINT_OPTIMIZED:?deploy the optimized endpoint first (jobs/deploy-optimized.sh MODE=optimized)}" ;;
+    *) echo "ROLE must be baseline|optimized, got '${ROLE}'"; exit 1 ;;
+  esac
 
-  # The stratified 18-task subset the gate scores. policy/dataset.quality_subset() is the
-  # canonical list; emit it for the RoboLab runner.
-  uv run python -c "import json; from policy.dataset import quality_subset; \
-    print(json.dumps([t.__dict__ for t in quality_subset()]))" > /local/subset.json
-  echo "subset tasks:"; cat /local/subset.json
+  # Both endpoints must serve the OpenPI websocket route (/v1/realtime/robot/openpi):
+  # deployed with a policy_server_config stage override AND cosmos_framework on the
+  # SERVER's PYTHONPATH (vllm-omni reuses its golden RoboLab action transforms). VERIFY
+  # also websocket auth: npa `--auth token` endpoints need an auth header RoboLab's
+  # client may not send — deploy the eval endpoints with `--auth none` or port-forward.
 
-  # VERIFY: drive RoboLab rollouts for each task against each endpoint (baseline + optimized),
-  # writing per-task success JSON. The runner entrypoint / flags are unpublished — confirm:
-  #   python RoboLab/policies/<policy>/run.py --task <T> --num-envs ${EPISODES_PER_TASK} \
-  #     --cosmos-endpoint <URL> --output-dir /local/robolab/<endpoint>/
-  # Then gate with the repo's comparator (drop <= SUCCESS_DROP_THRESHOLD).
-  #   uv run python run_robolab.py --backend vllm \
-  #     --endpoint-baseline "${COSMOS_ENDPOINT_BASELINE}" \
-  #     --endpoint-candidate "${COSMOS_ENDPOINT_OPTIMIZED}" --out-dir results
-  echo "MODE=${MODE} threshold=${SUCCESS_DROP_THRESHOLD} — wire the RoboLab runner (VERIFY) then gate."
+  # Real rollouts + gate. run_robolab.py reads the endpoints from the env; the 18-task
+  # slot -> RoboLab-task-name map is config/robolab_tasks.yaml (the run REFUSES to start
+  # while any slot is unfilled). Per-task records under results/robolab/<cid>/ make
+  # reruns resume instead of re-simulating (relaunch after a crash is safe).
+  export ROBOLAB_ROOT="$PWD/RoboLab"
+  export ROBOLAB_PYTHON="${ROBOLAB_PYTHON:-python}"   # VERIFY: the image's Isaac interpreter
+  echo "MODE=${MODE} ROLE=${ROLE} threshold=${SUCCESS_DROP_THRESHOLD}"
+  uv run python run_robolab.py --backend vllm --side "${SIDE}" --out-dir results
 
   if command -v aws >/dev/null 2>&1 && [ -d results ]; then
     aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"

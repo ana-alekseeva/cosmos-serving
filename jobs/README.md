@@ -73,7 +73,11 @@ stored it in the alias). The harness measures an existing endpoint when `--endpo
 
 ```bash
 python run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E6
-python run_robolab.py --backend vllm \
+# Real RoboLab gate — Isaac box only (Job 3): needs the NVLabs/RoboLab checkout, the
+# 18 slots in config/robolab_tasks.yaml filled with real task names, and both endpoints
+# serving the OpenPI websocket route (policy_server_config + cosmos_framework, see the
+# Job 3 yaml). Per-task records under results/robolab/ make reruns resume, not re-simulate.
+python run_robolab.py --backend vllm --robolab-root RoboLab \
   --endpoint-baseline https://<baseline-url> --endpoint-candidate https://<optimized-url>
 ```
 

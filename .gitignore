@@ -21,3 +21,5 @@ results-production/
 data/replay_real/
 # local secrets/config for jobs (jobs/with-env.sh); .env.example is the template
 .env
+results-production-v2/
+production-v2
