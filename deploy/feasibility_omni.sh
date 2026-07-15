@@ -49,7 +49,13 @@ pass S1 "venv + Cosmos3 pipeline registered"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
 "$WORK/.venv/bin/vllm" --help >/dev/null || fail S2 "vllm CLI"
 "$WORK/.venv/bin/vllm-omni" --help >/dev/null || fail S2 "vllm-omni CLI"
-pass S2 "both CLIs run"
+# Triton JIT-compiles C helpers at first GPU touch; a missing gcc or Python.h kills the
+# engine core AFTER the model load. Probe it here, in seconds, with a clear message.
+PYV=$("$PY" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
+command -v gcc >/dev/null || fail S2 "gcc missing — sudo apt-get install -y build-essential python${PYV}-dev"
+"$PY" -c "import triton; triton.runtime.driver.active.get_current_device()" \
+  || fail S2 "triton JIT probe — usually: sudo apt-get install -y build-essential python${PYV}-dev"
+pass S2 "both CLIs run + triton JIT probe"
 
 # --- S3: serve the checkpoint (downloads ~30GB on first run) --------------------------
 echo "S3 launching: vllm-omni serve $MODEL (log: $WORK/serve.log)"
