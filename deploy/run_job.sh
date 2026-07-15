@@ -85,6 +85,12 @@ if [ "$BACKEND" = vllm ]; then
   # (per-config subdirs via policy/pipeline.py). Traces upload to ${OUTPUT_URI}raw/traces/.
   export VLLM_TORCH_PROFILER_DIR="${VLLM_TORCH_PROFILER_DIR:-/local/vllm_traces}"
   mkdir -p "$VLLM_TORCH_PROFILER_DIR"
+  # Persist torch.compile artifacts across the matrix's per-config server launches: E2-E6
+  # each regionally-compile 36 DiT blocks at startup — with a shared cache root on the big
+  # NVMe, launches after the first reuse them (job wall-clock only; measured latency
+  # unaffected since compile happens before /health).
+  export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/local/vllm_cache_root}"
+  mkdir -p "$VLLM_CACHE_ROOT"
 else
   PYMODEL="$FRAMEWORK/.venv/bin/python"
   ( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server )
