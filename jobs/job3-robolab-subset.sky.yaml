@@ -1,22 +1,14 @@
-# Job 3 — RoboLab subset evaluation.
-#
-# The quality gate for the lossy techniques (Cache-DiT, FP8): run the stratified 18-task
-# subset (3 capability groups x 3 difficulty x 2 tasks, 10 episodes each) and REJECT any
-# optimization that regresses task success beyond SUCCESS_DROP_THRESHOLD. Real rollouts:
-# policy/robolab_runner.py drives the RoboLab runner per task against each endpoint's OpenPI
-# websocket route and run_robolab.py gates the parsed success rates. Prerequisite: fill the
-# 18 slots in config/robolab_tasks.yaml with real RoboLab task names (the run refuses to
-# start otherwise). Runs three configurations: baseline, final optimized PyTorch,
-# final production.
+# Job 3 — RoboLab subset evaluation: the quality gate for the lossy techniques (Cache-DiT, FP8).
+# Runs the stratified 18-task subset and REJECTS any optimization that regresses success beyond
+# SUCCESS_DROP_THRESHOLD. Prerequisite: fill the 18 slots in config/robolab_tasks.yaml (the run
+# refuses to start otherwise).
 #
 # HARDWARE — a DIFFERENT stack than the ablation. RoboLab needs Isaac Sim 5.x + Isaac Lab on an
-# RT-core GPU (>=48 GB): a Nebius RT-core platform (gpu-l40s-d / RTX PRO 6000), NOT gpu-h200-sxm
-# (H200 has no RT cores). The spec prefers a simulator job connected to a SEPARATE inference
-# endpoint so rendering/physics don't compete with inference on the same GPU. Every
-# `# VERIFY` must be confirmed on-box before the numbers are trustworthy.
+# RT-core GPU (>=48 GB): gpu-l40s-d / RTX PRO 6000, NOT gpu-h200-sxm (H200 has no RT cores).
+# Use a SEPARATE inference endpoint so rendering/physics don't compete with inference. Confirm
+# every `# VERIFY` on-box.
 #
-# TWO PARALLEL JOBS, one endpoint each (keeps the eval under the ~1 h wall budget: each
-# task's 10 episodes run as parallel envs, and the endpoints don't queue behind each other):
+# TWO PARALLEL JOBS, one endpoint each (keeps the eval under the ~1 h wall budget):
 #
 #   sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e0 \
 #     --env ROLE=baseline  --env COSMOS_ENDPOINT_BASELINE=https://<baseline>

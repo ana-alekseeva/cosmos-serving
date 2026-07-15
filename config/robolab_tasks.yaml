@@ -1,32 +1,9 @@
-# Stratified 18-task RoboLab subset -> real RoboLab task names (NVLabs/RoboLab
-# benchmark, 120 tasks; catalog: robolab/tasks/_metadata/task_metadata.json).
-#
-# WHY THESE 18 — the gate exists to catch FP8/Cache-DiT *action* degradation against the
-# baseline within a <1 h eval budget (two parallel L40S jobs, one endpoint each), so:
-#
-#   * Capability axis = RoboLab's OWN attribute families (its task_report.txt): visual
-#     (color/semantics/size grounding), relational (spatial/conjunction/counting),
-#     procedural (stacking/reorientation/insertion). The benchmark has no articulated or
-#     true tool-use tasks, so the spec's placeholder groups could not map honestly.
-#   * Difficulty = the metadata's complexity proxies (num_sequential_stages,
-#     num_atomic_conditions, clutter), since RoboLab publishes no difficulty labels.
-#   * Precision-critical motor tasks are over-weighted (stacking, insertion,
-#     reorientation, relative placement): small action noise flips their success first.
-#   * Reasoner-sensitive instructions included (vague / and / or / ordered "then"):
-#     they catch conditioning corruption, not just motor drift; "then" tasks are the
-#     sharpest probe for cross-chunk state drift. Always use the DEFAULT instruction
-#     variant — mixing variants across endpoints would confound the comparison.
-#   * Budget: every episode cap <=90 s (sum ~1110 s/set); 10 episodes run as parallel
-#     envs (--num-envs), so wall time/task ~ one cap + scene load. The 240-300 s
-#     long-horizon accumulation tasks are deliberately excluded — that coverage returns
-#     in Job 4 (full benchmark).
-#   * No likely floor/ceiling tasks: with 10 episodes/task, a ~0% or ~100% baseline task
-#     cannot resolve a drop; the 9-11-subtask monsters (ClearOrganicObjects, CleanUpToys)
-#     are excluded. Swap candidates if a task floors on the first run: GrabAFruitTask,
-#     WhiteMugInCenterOfTableTask, UnstackRubiksCubeTask, FruitsOnPlate3Task.
-#
-# Keys are policy/dataset.quality_subset() slot ids; policy/robolab_runner.load_task_map()
-# refuses unfilled or unknown slots.
+# Stratified 18-task RoboLab subset -> real RoboLab task names (NVLabs/RoboLab, 120 tasks).
+# Precision-motor tasks (stacking/insertion/reorientation) are over-weighted — small action
+# noise flips their success first, so they're the sharpest FP8/Cache-DiT canaries.
+# Always use the DEFAULT instruction variant: mixing variants across endpoints confounds the comparison.
+# Swap candidates if a task floors: GrabAFruitTask, WhiteMugInCenterOfTableTask, UnstackRubiksCubeTask, FruitsOnPlate3Task.
+# Keys are policy/dataset.quality_subset() slot ids; load_task_map() refuses unfilled/unknown slots.
 
 # visual — language/vision grounding, single->multi object, clutter at the hard end
 RoboLab-visual-easy-0: BananaInBowlTask               # canonical single-object baseline (50s)

@@ -1,21 +1,10 @@
 #!/usr/bin/env python
-"""PyTorch ablation matrix (Job 1).
-
-Runs every single-GPU configuration (P0-P3, E0-E4) as an isolated subprocess, with
-the bias controls (baseline at start + end, randomized order, wait between, drift
-rejection). One provisioned GPU; each config releases its CUDA context on exit.
+"""PyTorch ablation matrix (Job 1): run every single-GPU config as an isolated subprocess.
 
     python run_matrix.py --config config/experiment.yaml \
         --checkpoint-dir /local/model \
         --input-manifest /local/replay/manifest.json \
         --output-dir results
-
-Validate the whole pipeline first with a fast smoke run — 1 request per configuration, no
-warm-ups, no inter-config waits (each config still runs as its own subprocess, so this
-exercises the real CLI + subprocess + logging path, just quickly):
-
-    python run_matrix.py --smoke --output-dir results-smoke
-    python aggregate.py --out-dir results-smoke
 """
 from __future__ import annotations
 
@@ -43,7 +32,7 @@ def main(
     warmups: int = typer.Option(None, "--warmups", help="warm-up requests per config (override)"),
     no_subprocess: bool = typer.Option(False, "--no-subprocess", help="run in-process (no CUDA isolation)"),
 ) -> None:
-    if smoke:                                    # 1 request/config, no warm-ups, no inter-config waits
+    if smoke:
         replay_size = 1 if replay_size is None else replay_size
         warmups = 0 if warmups is None else warmups
     exp = load_experiment(config).override(

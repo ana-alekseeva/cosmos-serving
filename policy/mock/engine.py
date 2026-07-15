@@ -1,24 +1,7 @@
-"""Modeled latency engine (MOCK backend).
+"""Modeled latency engine (MOCK backend): per-stage latency from stage_multipliers, no GPU.
 
-`MockPolicyEngine` models each stage from the config's `stage_multipliers` so the whole
-harness (logs, waterfalls, aggregation) runs with NO GPU / NO model. Anchored to the
-example log (server_total ~175 ms at the generator baseline). Deterministic per request
-seed -> reproducible p50/p90/p99. The real path lives in policy/pipeline.py.
-
-Stage model (eager baseline, once per observation). Per-stage costs are anchored to the
-example log; the denoising loop runs the Cosmos3-Nano-Policy-DROID sampling recipe
-(configs.GENERATOR_SAMPLING: steps=4, guidance=3, shift=5, full-range CFG Null), so it is 4
-steps — not the 20 of the spec's illustrative example row:
-    preprocess 7.1 · h2d 1.2 · reasoner(single) 45.8 · generator_prepare 2.4
-    · denoise 4 x 5.8 = 23.2 · postprocess 1.8 · d2h 0.4 · transport ~9
-    => server_total ~81.9, chunk_total ~90.9
-The per-step cost (5.8 ms) folds in the full-range CFG two-forward cost; re-anchor it (and
-the stage costs above) from an on-box eager trace before trusting absolute numbers.
-
-Reasoner conditioning cache (P3 / E4): the conditioning is invariant across the denoising
-trajectory, so the naive baseline recomputes it every one of N_DENOISE_STEPS steps; caching
-computes it ONCE per observation. Modeled by REASONER_RECOMPUTE_FRACTION (=1.0, full
-recompute) and toggled by `config.reasoner_cached`.
+Stage costs are anchored to the example log; re-anchor from an on-box eager trace before
+trusting absolute numbers. Deterministic per request seed -> reproducible p50/p90/p99.
 """
 from __future__ import annotations
 
@@ -31,7 +14,7 @@ from policy.configs import N_DENOISE_STEPS, Config
 from policy.dataset import DroidRequest
 from policy.measure import LatencyRecord
 
-# ---- Eager-baseline stage costs (ms), anchored to the example log --------------
+# Eager-baseline stage costs (ms), anchored to the example log.
 BASE = {
     "preprocess": 7.1,
     "h2d": 1.2,
@@ -43,21 +26,15 @@ BASE = {
     "transport": 9.0,
 }
 BASELINE_PEAK_MEMORY_MB = 43120.0
-# Fraction of the reasoner conditioning that the naive path recomputes per denoising step.
-# 1.0 == the whole conditioning is recomputed every step (the literal baseline that the
-# reasoner-conditioning-cache removes). Tune from the on-box eager trace.
+# Fraction of the reasoner conditioning the naive path recomputes per step (1.0 = full recompute).
 REASONER_RECOMPUTE_FRACTION = 1.0
-# Modeled action drift for the lossy techniques (Cache-DiT, FP8), vs the eager output.
-# Below the gate threshold -> "passed" (the RoboLab subset makes the real call).
-# _LOSSY_DRIFT is a mock-simulator anchor (stays in code); the gate THRESHOLD is a run
-# parameter from the single config file (config/experiment.yaml -> quality_gate).
+# Mock-simulator drift anchor for the lossy techniques; the gate THRESHOLD is a run parameter.
 _LOSSY_DRIFT = {"cache_dit": 0.006, "quantization": 0.011}   # normalized action-MSE
 QUALITY_GATE_THRESHOLD = CONFIG.quality_gate.action_mse_threshold
 
 
 def _reasoner_ms(config: Config, single_eff: float) -> float:
-    """Effective reasoner conditioning time. Recomputed per step unless the reasoner-conditioning
-    cache is on (P3 / E4), which holds it at the single-conditioning cost."""
+    """Effective reasoner conditioning time; held at single cost when reasoner cache is on."""
     cached = config.reasoner_cached
     if cached:
         return single_eff
@@ -78,9 +55,7 @@ def _peak_memory_mb(config: Config) -> float:
 
 
 def _checksum(req: DroidRequest, config: Config) -> str:
-    """Deterministic per-request output checksum. Lossless configs produce the SAME checksum
-    as the eager baseline (numerical equivalence); lossy configs (Cache-DiT/FP8) deviate
-    deterministically so drift is visible in the logs."""
+    """Deterministic per-request checksum: lossless configs match the eager baseline, lossy deviate."""
     salt = "|".join(sorted(k for k in ("cache_dit", "quantization") if config.stage_flags.get(k)))
     h = hashlib.sha1(f"{req.seed}:{salt}".encode()).hexdigest()
     return h[:16]
@@ -110,9 +85,7 @@ class MockPolicyEngine:
     def run_request(self, req: DroidRequest) -> LatencyRecord:
         c = self.config
         mult = c.stage_multipliers
-        # Process-STABLE seed (not builtin hash(): that is PYTHONHASHSEED-randomized, which
-        # would make two runs of the same config in different subprocesses disagree; the run
-        # requires reproducible logs).
+        # Process-STABLE seed (not builtin hash(), which is PYTHONHASHSEED-randomized) for reproducible logs.
         rng = random.Random(req.seed ^ zlib.crc32(c.cid.encode()))
 
         def stage(base: float, key: str) -> float:

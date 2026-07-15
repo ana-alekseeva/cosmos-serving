@@ -1,28 +1,11 @@
 """Capture a REAL DROID replay set for latency measurement.
 
-Pulls N real observations from the open DROID dataset (Khazatsky et al. 2024) and writes them
-to disk + a manifest that `policy.dataset.load_manifest` reads — so the REAL run (Jobs 1 & 2)
-replays genuine robot observations instead of the synthetic `policy/mock/manifest.json`. Both
-jobs stage this ONE manifest, so their inputs are identical (comparability).
-
-DROID is exactly the observation format Cosmos3-Nano-Policy-DROID consumes. We capture the
-three RGB views the policy's RoBoArena concat view is built from (`wrist_image_left` +
-`exterior_image_1_left` + `exterior_image_2_left`) plus `joint_position` (7) +
-`gripper_position` (1) as the 8-D proprio state and the language instruction.
-
-Why 50 observations: at batch-1 with fixed shapes, latency is ~content-independent, so a small
-fixed set is representative. We measure each of the 50 once (replay_size=50) — solid p50, ok
-p90, rough p99. Raise replay_size to cycle the set (`dataset.tile_to`) for tighter tails,
-MLPerf single-stream style (a fixed set repeated to the query count).
-
-Runs on a box with `tensorflow-datasets` + `tensorflow` and DROID access. droid_100 is a small
-~real subset (100 episodes / 32k frames / 47 tasks) loaded by DIRECTORY from the public bucket
-gs://gresearch/robotics/droid_100/<ver> (NOT a registered tfds name). NOT exercised by the mock
-tests; every DROID field name below is a `# VERIFY` against your build.
+Pulls N real observations from the open DROID dataset (Khazatsky et al. 2024) to disk + a
+manifest that `policy.dataset.load_manifest` reads. droid_100 loads by DIRECTORY from the public
+bucket (NOT a registered tfds name); every DROID field name below is a `# VERIFY` against your build.
 
     uv pip install tensorflow-datasets tensorflow-cpu
     python -m policy.capture --n 50 --out data/replay_real
-    # then run the real matrix against it:
     uv run python run_matrix.py --backend vllm --input-manifest data/replay_real/manifest.json
 """
 from __future__ import annotations
@@ -36,8 +19,6 @@ from policy.dataset import DroidRequest, write_manifest
 
 FIXTURE_SIZE = 50
 STEPS_PER_EPISODE = 3            # spread the N observations across ~N/3 episodes for variety
-# droid_100 is NOT a registered tfds name — it is an Open X-Embodiment RLDS dataset loaded by
-# DIRECTORY from the public GCS bucket (a ~2GB, 100-trajectory sample in the full-droid format).
 DROID_BUILDER_DIR = "gs://gresearch/robotics/droid_100/1.0.0"   # VERIFY the version subdir
 
 # DROID RLDS field names (# VERIFY against your tfds `droid`/`droid_100` build).
@@ -53,10 +34,9 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
                   dataset: str = DROID_BUILDER_DIR, seed: int = CONFIG.dataset.replay_seed) -> Path:
     """Pull `n` real DROID observations -> per-obs .npz tensors + a manifest at out_dir.
 
-    Deterministic (fixed episode/step stride + seed) so the captured set is reproducible and
-    IDENTICAL across Jobs 1 & 2. Static-shape requirement: observations whose
-    image resolution differs from the first kept one are skipped (CUDA-graph rungs need a
-    single bucketed shape) — logged so the drop is not silent."""
+    Deterministic (fixed stride + seed) so the set is IDENTICAL across Jobs 1 & 2. Observations
+    whose resolution differs from the first kept one are skipped (CUDA-graph rungs need one shape).
+    """
     import os
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")   # hide TF INFO/WARNING (oneDNN, GCS auth fallback)
     os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")  # drop the oneDNN notice

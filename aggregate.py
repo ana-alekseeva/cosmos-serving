@@ -1,9 +1,5 @@
 #!/usr/bin/env python
-"""Aggregation.
-
-A small CPU job that merges every per-configuration output and generates CSV/Parquet
-summaries, the three waterfalls (reasoner/generator/end-to-end), the baseline-vs-final
-stage breakdown, confidence intervals, quality-comparison tables, and figures.
+"""Merge per-configuration outputs into CSV/Parquet summaries, waterfalls, and figures.
 
     python aggregate.py --out-dir results
 """

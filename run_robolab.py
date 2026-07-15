@@ -1,21 +1,7 @@
 #!/usr/bin/env python
-"""RoboLab quality evaluation.
+"""RoboLab quality gate (Job 3): compare candidate task success vs baseline on the subset.
 
-Compares a candidate configuration's task success against the baseline on the stratified
-18-task subset (Job 3) and rejects it if success regresses beyond the threshold — the gate
-for the lossy Cache-DiT / FP8 techniques. Run the full benchmark (Job 4) only after the
-subset passes.
-
-    # gate-plumbing check, no simulator (candidate defaults to the ladder's final rung):
     python run_robolab.py --baseline E0 --out-dir results
-    # real, two parallel L40S jobs (one endpoint each — halves the <1 h wall budget):
-    python run_robolab.py --backend vllm --robolab-root RoboLab --side baseline \
-        --endpoint-baseline https://<baseline>
-    python run_robolab.py --backend vllm --robolab-root RoboLab --side candidate \
-        --endpoint-candidate https://<optimized>
-    # then gate from the merged per-task records (resumes; no simulator needed):
-    python run_robolab.py --backend vllm --robolab-root RoboLab --side both \
-        --endpoint-baseline https://<baseline> --endpoint-candidate https://<optimized>
 """
 from __future__ import annotations
 
@@ -54,8 +40,7 @@ def main(
     rollout_dir = rollout_dir or out_dir / "robolab"
 
     if side != "both":
-        # One side of the comparison only (parallel L40S jobs). No gate yet: per-task
-        # records land under rollout_dir/<cid>/ and the gate run merges + resumes them.
+        # One side only, no gate yet: records land under rollout_dir/<cid>/; --side both merges + resumes them.
         cid, ep = ((baseline, endpoint_baseline) if side == "baseline"
                    else (candidate, endpoint_candidate))
         result = run_quality_subset(config_by_id(cid), backend=backend, endpoint=ep,

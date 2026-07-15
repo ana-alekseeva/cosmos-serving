@@ -1,16 +1,8 @@
 """PyTorch ablation matrix orchestrator (Job 1).
 
-Runs every single-GPU configuration (P0-P3, E0-E4) as an isolated subprocess so
-each releases its CUDA context before the next starts. Applies the bias controls
-for one long provisioned job:
-
-    Baseline (E0)
-      -> configuration matrix in randomized order
-      -> Baseline (E0) repeated
-
-Then compares the two baseline measurements and REJECTS the run if they differ beyond
-`baseline_drift_reject_pct` (GPU drift). Waits briefly between subprocesses; stages inputs
-locally first. This module is the importable core; run_matrix.py is the CLI wrapper.
+Runs each config as an isolated subprocess (releases CUDA context between configs). Order:
+baseline E0 -> randomized matrix -> baseline E0 repeated, then REJECTS the run if the two
+baselines drift beyond `baseline_drift_reject_pct`. run_matrix.py is the CLI wrapper.
 """
 from __future__ import annotations
 
@@ -67,9 +59,6 @@ def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool,
 def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
     """Run the full ablation matrix with bias controls. Returns the matrix status dict."""
     requests = load_requests(exp)                       # stage inputs locally before timing
-    # Route each config to its serving backend: the end-to-end (E) waterfall — and the
-    # Cache-DiT/FP8 rungs — run on vLLM/vLLM-Omni; the R/G native rungs run on
-    # the PyTorch reference. A mock run keeps everything modeled.
     all_cfgs = resolve_configs(exp.configurations)
     cfg_backend = {c.cid: compat.resolve_backend(c, exp.backend) for c in all_cfgs}
     configs = [c for c in all_cfgs if compat.supported(c, cfg_backend[c.cid])]
@@ -88,7 +77,6 @@ def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
     base_cid = baseline_id(END_TO_END)                  # E0 — the combined-pipeline baseline
     have_base = any(c.cid == base_cid for c in configs)
 
-    # Order: baseline first, matrix randomized, baseline repeated.
     middle = [c.cid for c in configs]
     if exp.randomize_order:
         random.Random(exp.order_seed).shuffle(middle)

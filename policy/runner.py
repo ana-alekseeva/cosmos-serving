@@ -1,15 +1,7 @@
 """Run ONE configuration end-to-end (Job 1 subprocess).
 
-Each configuration runs as its own subprocess (run_configuration.py) so its CUDA context
-is released before the next one starts. The subprocess:
-
-    1. loads the model from local storage
-    2. runs warm-up requests (excluded from timing)
-    3. runs the fixed latency replay set (the 50 unique obs, once each)
-    4. writes <cid>.jsonl + summary.json + environment.json + system-info.json + status.json
-    5. exits (releasing the CUDA context)
-
-This module is the importable core; run_configuration.py is the thin CLI wrapper.
+Each config runs as its own subprocess (run_configuration.py) so its CUDA context is released
+before the next one starts. This module is the importable core; run_configuration.py is the CLI wrapper.
 """
 from __future__ import annotations
 
@@ -36,8 +28,7 @@ def _now() -> str:
 
 
 def set_torchinductor_cache(config: Config, root: str) -> str:
-    """Per-configuration compilation-cache directory: /tmp/torchinductor/<cid>.
-    Isolates each config's torch.compile cache so timings don't cross-contaminate."""
+    """Per-config torch.compile cache dir (isolated so timings don't cross-contaminate)."""
     cache_dir = str(Path(root) / config.cid)
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
@@ -78,10 +69,7 @@ def run_configuration(
             engine.run_request(req)
         for req in requests:                            # measured pass (fixed replay set)
             records.append(engine.run_request(req))
-        # Optional GPU-op trace (Perfetto-style; vLLM's server-side torch profiler): one EXTRA
-        # profiled request AFTER the measured pass so profiler overhead never touches the
-        # records. Duck-typed — only engines that support it (VLLMPolicyEngine) define it, and
-        # a broken profiler route must not fail an otherwise-good config.
+        # Optional profiled request AFTER the measured pass; duck-typed, and must not fail a good config.
         capture = getattr(engine, "capture_profile", None)
         if capture is not None and records:
             try:
@@ -111,8 +99,7 @@ def run_configuration(
 
 
 def _quality_drift(config: Config, backend: str) -> float | None:
-    """Modeled action drift for lossy configs (mock only) — the RoboLab subset is the real
-    gate. Lossless configs are exact-match (drift 0)."""
+    """Modeled action drift for lossy configs (mock only); lossless configs are exact-match."""
     if backend != "mock":
         return None
     from policy.mock.engine import _quality_gate
@@ -129,10 +116,5 @@ def resolve_configs(cids: list[str] | None):
 
 
 def load_requests(exp: Experiment) -> list[DroidRequest]:
-    """Load the replay manifest, sized to replay_size measured requests.
-
-    Default replay_size == the unique set, so every observation is measured once (tile_to is a
-    pass-through); a smoke run (replay_size=1) takes the first one, and a larger replay_size
-    cycles the set for tighter tails. A missing manifest raises (regenerate the mock fixture
-    with `python -m policy.mock.replay` or stage a real capture manifest)."""
+    """Load the replay manifest, sized to replay_size measured requests (tile_to cycles the set)."""
     return tile_to(load_manifest(exp.input_manifest), exp.replay_size)

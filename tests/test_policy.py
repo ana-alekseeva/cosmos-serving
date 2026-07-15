@@ -1,9 +1,7 @@
 """Sanity tests for the Cosmos3-Nano-Policy-DROID harness — `uv run pytest`.
 
-Tests LOGIC and INVARIANTS (waterfall monotonicity, the log schema, reproducibility,
-the drift check, the acceptance checks, the quality gate), not the mock's modeled
-constants (those are replaced by real vLLM/vLLM-Omni measurements on the GPU) nor the
-matplotlib rendering.
+Tests logic and invariants (waterfall monotonicity, log schema, reproducibility, drift,
+acceptance, quality gate), not the mock's modeled constants nor matplotlib rendering.
 """
 import json
 from dataclasses import replace as dc_replace

@@ -1,13 +1,4 @@
-"""Figures (required outputs).
-
-  plot_waterfall          Native PyTorch (P0-P3) / end-to-end (E0-E4)
-                          contribution waterfalls — descending staircase, marginal %
-                          drop per rung, 95% bootstrap CI whiskers.
-  plot_stage_breakdown    Baseline vs final stacked stage composition (the six stages).
-  plot_quality_comparison Lossy FP8 rung — speedup + gate verdict + drift.
-
-Style mirrors the repo's prior figures (Agg backend, sequential blue palette, dpi=150).
-"""
+"""Figures: waterfall, stage breakdown, and quality-comparison plots."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 COLOR_BAR = "#1a80bb"       # lossless
-COLOR_LOSSY = "#8cc5e3"     # lossy (quality-guarded)
+COLOR_LOSSY = "#8cc5e3"     # lossy
 COLOR_FAIL = "#c8102e"      # gate failed
 COLOR_ANNOT = "black"
 COLOR_GRID = "#d9d9d9"

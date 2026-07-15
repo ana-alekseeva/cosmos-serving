@@ -1,19 +1,5 @@
 #!/usr/bin/env python
-"""Trace + results analysis figures (report plots beyond aggregate.py's required-output set).
-
-Consumes the matrix results dir (per-config JSONL) plus the job's profiler traces
-(the extracted `traces/` directory downloaded from S3, or an optional tar archive) and produces:
-
-  model_parts.png/.csv        which parts of the MODEL are slowest — CUDA time %
-                              attributed to components (vision encoder, UND language
-                              tower, GEN attention/MLP, VAE, guardrail, ...) from the
-                              with_stack flamegraph (stacks_cuda_rank0.txt)
-  kernel_composition.png/.csv GEMM / attention / fused / elementwise / memory shares
-                              per rung, from the Chrome trace kernel events
-  pareto_latency_vram.png     p50 latency vs peak VRAM per rung (E4 = joint optimum)
-  latency_ecdf.png            per-request latency ECDFs with p50/p99 markers
-  denoise_steps.png           per-denoise-step latency, eager baseline vs final rung
-  request_timeline.png        latency vs request index (drift/bias-control evidence)
+"""Report figures from the matrix results dir and profiler traces.
 
     python analyze_traces.py --results-dir results --traces results/traces
 """
@@ -32,24 +18,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import typer
 
-# Validated categorical palette (dataviz six-checks, light surface; contrast WARNs on
-# slots 2/3 are relieved by direct % labels + the CSV emitted next to every figure).
+# Categorical palette; contrast WARNs on slots 2/3 relieved by direct % labels + CSV.
 CAT = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948"]
-# Ordered blue ramp for the ordinal rungs E0..E4 (lines start at step 250 for contrast).
+# Ordered blue ramp for the ordinal rungs E0..E4.
 RAMP = ["#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 GRID = "#d9d9d9"
 E_ORDER = ["E0", "E1", "E2", "E3", "E4"]
 
-# --- model-part attribution (leaf-first, first match wins) -------------------------
-# Patterns written against the OBSERVED python_function frame vocabulary in the Job 2
-# traces ("file.py(line): func" / "<built-in ...>" names). Note: under torch.compile the
-# python stack collapses at the compiled-graph boundary, so compiled rungs attribute the
-# fused transformer to the explicit "compiled region" bucket — full component splits are
-# meaningful on the EAGER rungs (E0/E1); kernel_composition covers compiled rungs.
+# model-part attribution (leaf-first, first match wins). Under torch.compile the python
+# stack collapses at the graph boundary, so component splits are meaningful only on EAGER
+# rungs (E0/E1); compiled rungs land in "compiled region" and kernel_composition covers them.
 MODEL_PARTS: list[tuple[str, re.Pattern]] = [
-    # GEMMs deliberately have NO leaf bucket: an aten::mm leaf stays unmatched so the
-    # OWNING module frame above it (nn.Module: Cosmos3GatedMLP_/CausalAttention_...) or the
-    # transformer file frame claims the projection — that's what makes the split meaningful.
+    # GEMMs deliberately have NO leaf bucket: an aten::mm leaf stays unmatched so the owning
+    # module/transformer frame above it claims the projection — that's what makes the split meaningful.
     ("attention (SDPA/FA3 + QKV)", re.compile(
         r"scaled_dot_product_attention|attention/backends|attention/layer\.py|fa3|flash|fmha"
         r"|causalattention|crossattention", re.I)),
@@ -59,17 +40,15 @@ MODEL_PARTS: list[tuple[str, re.Pattern]] = [
     ("VAE", re.compile(r"autoencoder|(^|[^a-z])vae", re.I)),
     ("vision encoder", re.compile(r"qwen3_vl|vision|visual", re.I)),
     ("guardrail", re.compile(r"guardrail", re.I)),
-    # NB: no pybind11 pattern — FA3's leaf is ALSO a pybind fwd; the pybind frame stays
-    # unmatchable so the frame above it (fa.py wrapper vs dynamo/inductor) decides.
+    # NB: no pybind11 pattern — FA3's leaf is ALSO a pybind fwd; leave it unmatchable so the frame above decides.
     ("compiled region (fused transformer)", re.compile(
         r"_dynamo|_inductor|eval_frame|output_code|cudagraph|cuda_graph|graphs\.py", re.I)),
     ("scheduler/sampling", re.compile(r"unipc|scheduler|denoise_step|sample_actions", re.I)),
     ("transformer (other)", re.compile(r"transformer_cosmos3|pipeline_cosmos3|embed|conv", re.I)),
 ]
 
-# transformer_cosmos3.py class line ranges (vllm-omni 0.24.0 — deploy/versions.env pins it):
-# frames name only "file.py(LINE): forward", so class ownership of the projection GEMMs
-# comes from the line number. Ranges = class def line .. next class def - 1.
+# transformer_cosmos3.py class line ranges (vllm-omni 0.24.0): frames name only
+# "file.py(LINE): forward", so class ownership of the projection GEMMs comes from the line number.
 _TF_LINE = re.compile(r"transformer_cosmos3\.py\((\d+)\)")
 _TF_LINE_MAP: list[tuple[int, int, str]] = [
     (44, 53, "norms/modulation"),                    # RMSNorm
