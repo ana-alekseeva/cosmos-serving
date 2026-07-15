@@ -50,11 +50,15 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
 "$WORK/.venv/bin/vllm" --help >/dev/null || fail S2 "vllm CLI"
 "$WORK/.venv/bin/vllm-omni" --help >/dev/null || fail S2 "vllm-omni CLI"
 # Triton JIT-compiles C helpers at first GPU touch; a missing gcc or Python.h kills the
-# engine core AFTER the model load. Probe it here, in seconds, with a clear message.
+# engine core AFTER the model load. Install the toolchain if absent, then probe in seconds.
 PYV=$("$PY" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
-command -v gcc >/dev/null || fail S2 "gcc missing — sudo apt-get install -y build-essential python${PYV}-dev"
+if ! command -v gcc >/dev/null || [ ! -f "/usr/include/python${PYV}/Python.h" ]; then
+  echo "S2 installing build toolchain (gcc + python${PYV}-dev) for triton's JIT..."
+  sudo apt-get update -qq && sudo apt-get install -y -qq build-essential "python${PYV}-dev" \
+    || fail S2 "toolchain install — run manually: sudo apt-get install -y build-essential python${PYV}-dev"
+fi
 "$PY" -c "import triton; triton.runtime.driver.active.get_current_device()" \
-  || fail S2 "triton JIT probe — usually: sudo apt-get install -y build-essential python${PYV}-dev"
+  || fail S2 "triton JIT probe (toolchain present but compile still failing — see error above)"
 pass S2 "both CLIs run + triton JIT probe"
 
 # --- S3: serve the checkpoint (downloads ~30GB on first run) --------------------------
