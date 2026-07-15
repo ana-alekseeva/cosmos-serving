@@ -79,6 +79,14 @@ if [ ! -d "$FW_DIR" ]; then
   [ -e "$FW_DIR/cosmos_framework/model/vfm" ] || ln -s generator "$FW_DIR/cosmos_framework/model/vfm"
 fi
 export PYTHONPATH="$FW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+# The action-transform import chain (lazy_config -> file_io -> text_tokenizer) needs the
+# framework's pure-python UTILITY deps. We install ONLY those — deliberately NOT the
+# framework's ML core (transformers/diffusers/accelerate/torch): vllm-omni 0.24 needs
+# transformers>=5 but the framework caps it <5, so a blanket `pip install cosmos-framework`
+# would downgrade transformers and break the omni server. These leaf packages pull no torch.
+uv pip install --python "$PY" -q \
+  iopath omegaconf hydra-core attrs cattrs loguru tyro termcolor \
+  einops scipy msgpack pydantic obstore av imageio imageio-ffmpeg nvidia-ml-py
 "$PY" -c "from cosmos_framework.data.vfm.action.transforms import ActionTransformPipeline; \
   print('cosmos_framework import OK (RoboLab action transforms resolve)')" \
   || { echo "FAIL: cosmos_framework not importable — RoboLab route will 500"; exit 1; }
