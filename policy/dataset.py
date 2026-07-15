@@ -1,24 +1,6 @@
-"""Shared data contract for the latency harness.
-
-Backend-agnostic: this module defines the request/task TYPES and the manifest LOADER that
-BOTH the mock and the real (vLLM/vLLM-Omni) paths consume. It holds no synthetic data — the
-committed `manifest.json` is the source of truth for the replay set (instructions, ids,
-shapes live there, not in code).
-
-  1. Offline replay set — a FIXED set of requests captured from RoboLab episodes, loaded
-     from `manifest.json`. Each request carries camera observations, instruction,
-     proprioceptive state, task/episode ids, control timestep, and a fixed inference seed.
-     The real driver rebuilds tensors from `capture_ref`; the mock reads only the shape
-     metadata (latency is shape-driven). Each observation is measured once by default;
-     `tile_to` can cycle the set to a larger measured count for tighter tail percentiles.
-
-  2. RoboLab quality subset — a stratified ~18-task subset (3 capability groups x 3
-     difficulty levels x 2 tasks), 10 episodes/task. Used to REJECT optimizations that
-     damage policy performance (the lossy quality gate). The full RoboLab benchmark is
-     only needed for baseline + final (Job 4).
-
-The MOCK generator that PRODUCES a synthetic manifest for tests/dev lives in
-`policy/mock/replay.py`; it is not imported here and never runs on the real path.
+"""Shared data contract for the latency harness — request/task types + manifest loader,
+consumed by both the mock and real (vLLM/vLLM-Omni) paths. The committed `manifest.json`
+is the source of truth for the replay set.
 """
 from __future__ import annotations
 
@@ -28,9 +10,7 @@ from pathlib import Path
 
 from policy.config import CONFIG
 
-# All shapes/structure come from the single config file (config/experiment.yaml -> CONFIG).
-# These module names are kept as thin re-exports so callers read the same symbols. DROID
-# shapes are static across the replay set so CUDA-graph configs capture fixed shapes.
+# DROID shapes are static across the replay set so CUDA-graph configs capture fixed shapes.
 _D = CONFIG.dataset
 CAMERA_VIEWS = _D.camera_views          # DROID convention (exterior + wrist)
 IMAGE_HW = _D.image_hw                  # per-view RGB resolution fed to the reasoner
@@ -55,8 +35,7 @@ class DroidRequest:
     control_timestep: int          # step index within the episode
     seed: int                      # fixed inference seed (reproducibility)
     instruction: str
-    # Fixed shapes (static — CUDA-graph friendly). The mock uses only these; the real
-    # driver materializes the actual tensors from the RoboLab capture referenced here.
+    # Fixed shapes (static — CUDA-graph friendly); real driver materializes tensors from capture_ref.
     camera_views: tuple = CAMERA_VIEWS
     image_hw: tuple = IMAGE_HW
     proprio_dim: int = PROPRIO_DIM
@@ -69,11 +48,7 @@ class DroidRequest:
 
 def write_manifest(reqs: list[DroidRequest], path: str | Path, *,
                    source: str = "cosmos-droid-replay") -> Path:
-    """Serialize a replay set to a manifest.json (the schema load_manifest reads).
-
-    Shared by the mock generator (policy/mock/replay.py) and the real DROID capture
-    (policy/capture.py). `static_shapes` is recorded from the first request's actual shapes
-    so a real-capture manifest reports its true geometry."""
+    """Serialize a replay set to a manifest.json (the schema load_manifest reads)."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     r0 = reqs[0] if reqs else None
@@ -93,10 +68,7 @@ def write_manifest(reqs: list[DroidRequest], path: str | Path, *,
 
 
 def load_manifest(path: str | Path) -> list[DroidRequest]:
-    """Load the fixed replay set from a manifest (shared by the mock and real paths).
-
-    The committed manifest is the source of truth. Regenerate a synthetic one with
-    `python -m policy.mock.replay`; a real run stages a manifest of real captures."""
+    """Load the fixed replay set from a manifest (shared by the mock and real paths)."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(
@@ -119,13 +91,9 @@ def load_manifest(path: str | Path) -> list[DroidRequest]:
 
 
 def tile_to(requests: list[DroidRequest], n: int) -> list[DroidRequest]:
-    """Return exactly `n` measured requests from the fixed replay set.
+    """Return exactly `n` measured requests from the fixed replay set (cycles if n > len).
 
-    Default: `n == len(requests)`, so this is a pass-through — every unique observation is
-    measured once. `n < len` takes the first `n` (e.g. a smoke run's replay_size=1). `n > len`
-    cycles the set (raise replay_size if you want repeats for tighter tail percentiles).
-    Deterministic (reproducible): `request_id` is the measured-slot index and the seed is
-    re-derived per repeat, so any cycled requests are distinct but a pure function of input."""
+    Deterministic: request_id is the slot index and the seed is re-derived per repeat."""
     if not requests:
         return []
     out = []

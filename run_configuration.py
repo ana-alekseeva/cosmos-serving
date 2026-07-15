@@ -1,10 +1,5 @@
 #!/usr/bin/env python
-"""Run ONE optimization configuration (Job 1 subprocess).
-
-Invoked once per configuration by run_matrix.py, in its own process so the CUDA context is
-released on exit. Loads the model, warms up, replays the fixed latency set, and writes the
-five artifacts (<cid>.jsonl, summary.json, environment.json, system-info.json,
-status.json) into <out-dir>/<out-subdir>/.
+"""Run ONE optimization configuration (Job 1 subprocess, own process for CUDA isolation).
 
     python run_configuration.py --configuration P0 --backend mock --out-dir results
 """
@@ -38,8 +33,7 @@ def main(
     is_baseline: bool = typer.Option(False, "--is-baseline", help="tag as a §8 drift baseline"),
 ) -> None:
     config = config_by_id(configuration)
-    # Load the replay manifest; measure replay_size requests (default = the unique set, once
-    # each). A small --replay-size (e.g. --smoke's 1) takes the first N; a larger one cycles.
+    # replay_size <= unique set takes the first N; larger cycles.
     requests = tile_to(load_manifest(manifest), replay_size)
     info = run_configuration(
         config, requests, backend=backend, out_dir=out_dir, run_id=run_id, model=model,

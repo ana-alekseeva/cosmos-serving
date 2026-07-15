@@ -1,26 +1,9 @@
 """Native PyTorch reference backend (Cosmos 3 report) via cosmos_framework.
 
-Reuses `cosmos_framework.scripts.action_policy_server_robolab.RobolabPolicyService` — the
-reference DROID policy inference — for model loading, the observation transform, and the single
-`generate_samples_from_batch` call. We drive it per replay request and time it with CUDA events.
-
-Per-stage split: inference is ONE call, so we register forward hooks on the reasoner tower
-+ the diffusion denoiser submodules to split the call into reasoner_ms / denoising_ms. Hooks
-fire in eager/compile mode; under CUDA-graph *replay* they are opaque, so for the cuda_graphs
-rungs the split collapses into denoising_ms and only the end-to-end latency is exact.
-
-Optimization flags map to the OmniSetup at LOAD time: torch.compile -> use_torch_compile,
-CUDA graphs -> use_cuda_graphs (injected via a RobolabServerArgs subclass since the stock server
-does not expose them). FP8 + Cache-DiT are vLLM-Omni-only -> those configs route to the
-vllm backend (policy/compat.resolve_backend), never here.
-
-Attention is fixed to cuDNN *fused* attention (flash-class) here: cosmos_framework's dispatcher
-offers no math/SDPA backend, so the R/G reference ladders have no math-vs-flash rung (that lives on
-the vLLM E-ladder). prepare() pins it with I4_ATTN_BACKENDS=cudnn — no flash_attn build required.
-
-Requires cosmos_framework on the box. Every cosmos symbol is a `# VERIFY` against your version;
-the reasoner/denoiser submodule names are the main thing to confirm (a warning prints the model
-children if the defaults miss).
+Reuses RobolabPolicyService's `generate_samples_from_batch` per replay request, timed with CUDA
+events. Forward hooks on the reasoner/denoiser submodules split the one call into
+reasoner_ms/denoising_ms (opaque under CUDA-graph replay). FP8/Cache-DiT route to vllm, not here.
+Requires cosmos_framework; every cosmos symbol is a `# VERIFY` against your version.
 """
 from __future__ import annotations
 
@@ -40,8 +23,7 @@ _DENOISER_CANDIDATES = ("denoiser", "dit", "net", "generator", "diffusion_model"
 
 
 class _StageHooks:
-    """Time named submodules via forward hooks + CUDA events so one generate_samples_from_batch
-    call yields the reasoner/denoiser split. Eager/compile only — graph replay is opaque."""
+    """Time named submodules via forward hooks + CUDA events. Eager/compile only — graph replay is opaque."""
 
     def __init__(self):
         self._handles: list = []
@@ -103,8 +85,7 @@ def _build_service(checkpoint: str, config: Config, gen):
                 "checkpoint_path": args.checkpoint_path,
                 "output_dir": args.output_dir or _DEFAULT_ROBOLAB_OUTPUT_DIR,
                 "sampler": args.sampler,
-                # Skip the gated nvidia/Cosmos-Guardrail1 download — the safety guardrail is a
-                # content filter, not part of action-policy latency (excluded).
+                # Skip the gated Guardrail download — content filter, not action-policy latency.
                 "guardrails": False,
                 "use_torch_compile": compile_,      # torch.compile (cosmos default is True!)
                 "use_cuda_graphs": graphs,          # CUDA-graph replay
@@ -140,22 +121,15 @@ class PyTorchPolicyEngine:
 
         import torch
 
-        # Attention backend. cosmos_framework's dispatcher has no math/SDPA backend —
-        # only fused kernels — so the reference baseline is torch-native cuDNN *fused* attention
-        # (flash-class), which needs no flash_attn build (only cuDNN >= 9.22 in the torch runtime).
-        # I4_ATTN_BACKENDS is read at attention-call time, so setting it before the model runs is
-        # enough; setdefault lets a box override it (e.g. "flash2" if flash_attn is installed).
+        # cuDNN *fused* attention (flash-class); needs cuDNN >= 9.22 but no flash_attn build.
+        # I4_ATTN_BACKENDS is read at attention-call time; setdefault lets a box override it.
         os.environ.setdefault("I4_ATTN_BACKENDS", "cudnn")
 
         self._svc = _build_service(self.checkpoint, self.config, GENERATOR_SAMPLING)
         self._model = self._svc.model
         self._device = torch.device("cuda")
-        # Stage hooks: reasoner tower + diffusion denoiser (VERIFY the submodule names).
-        # SKIP them under CUDA-graph replay (reduce-overhead): the per-forward CUDA-event records
-        # are "non-GPU ops" that force cudagraph *partitioning* (the framework logs exactly that),
-        # fragmenting the captured loop so replay can't remove launch overhead — which is why CUDA
-        # graphs otherwise appear not to help. The reasoner/denoiser split is opaque under replay
-        # anyway, so graph configs are timed end-to-end only (server_ms / total_chunk_ms are exact).
+        # SKIP hooks under CUDA-graph replay: the per-forward CUDA-event records force cudagraph
+        # partitioning, fragmenting the loop so replay can't remove launch overhead.
         self._hooks = _StageHooks()
         if self.config.stage_flags.get("cuda_graphs"):
             return
@@ -227,12 +201,7 @@ class PyTorchPolicyEngine:
         )
 
     def _obs(self, req: DroidRequest) -> dict:
-        """Raw DROID observation dict for RobolabPolicyService._build_sample.
-
-        Passes the 3 RoBoArena views the model's concat view is built from
-        (`observation/{wrist,exterior_1,exterior_2}_image_left`, from _compose_roboarena_views)
-        + `observation/joint_position` [1,7] + `observation/gripper_position` [1,1] + `prompt`.
-        Older 2-view captures (no exterior_2) fall back to a single `observation/image`."""
+        """Raw DROID observation dict for RobolabPolicyService._build_sample (3-view concat + proprio + prompt)."""
         import numpy as np
         from policy.capture import load_capture
 
@@ -258,8 +227,7 @@ class PyTorchPolicyEngine:
 
 
 def _action_checksum(action) -> str:
-    """Checksum of the (32,8) action chunk, rounded to tolerate compile/kernel FP noise so
-    lossless rungs (compile/graphs) match the eager baseline."""
+    """Checksum of the (32,8) action chunk, rounded to tolerate compile/kernel FP noise."""
     import numpy as np
     a = np.round(np.asarray(action, dtype="float64"), 3)
     return hashlib.sha1(a.tobytes()).hexdigest()[:16]

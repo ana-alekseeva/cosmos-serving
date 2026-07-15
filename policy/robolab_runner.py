@@ -1,32 +1,8 @@
 """Real RoboLab rollout driver (Job 3) — Isaac box only.
 
-Drives the RoboLab benchmark (NVLabs/RoboLab, Isaac Lab) against a DEPLOYED Cosmos3
-endpoint and turns the per-task rollout outputs into the success dict the gate in
-policy/robolab.py compares. The simulator and the policy never share a process: RoboLab's
-sim-side client speaks the OpenPI websocket protocol, and vLLM-Omni serves exactly that
-protocol at /v1/realtime/robot/openpi (endpoint deployed with a policy_server_config
-stage override + cosmos_framework on the server's PYTHONPATH).
-
-Contract, verified against the RoboLab docs (2026-07-15):
-  * Server-client eval: the policy is a standalone server; a lightweight client inside
-    the simulator sends observations and receives actions (docs/policy.md).
-  * Default DROID observation registration — over_shoulder_left_camera + wrist_cam
-    (N,H,W,3 uint8), arm_joint_pos (N,7), gripper_pos (N,1) — matches the Cosmos DROID
-    contract (joint(7)+gripper(1), wrist + exterior views). The openpi packing seam is
-    RoboLab's _pack_request(); VERIFY the served schema on-box against the server's
-    policy_server_config handshake.
-  * Runner: the pi0_family README documents `--policy ... --task <T> --num-envs N
-    --headless --remote-uri <URI>` (--remote-uri overrides --remote-host/--remote-port —
-    required here, because the Cosmos route lives at a PATH under the HTTP port, which
-    host/port alone cannot express). docs/policy.md also shows a `run_eval.py` form;
-    VERIFY which entrypoint the pinned ref ships (ROBOLAB_RUNNER selects it).
-  * Results land under output/<timestamp or name>/ as JSON success metrics
-    (docs/policy.md); the exact schema is unpublished, so parse_task_success() accepts
-    the plausible shapes and fails loudly (listing every file it saw) otherwise.
-
-Reruns are idempotent: each parsed task writes a per-task record under the rollout
-dir, and an existing record short-circuits the subprocess — a crashed job resumes where
-it stopped instead of re-simulating finished tasks.
+Drives the RoboLab benchmark against a deployed Cosmos3 endpoint and turns per-task rollout
+outputs into the success dict the gate in policy/robolab.py compares. Reruns are idempotent:
+an existing per-task record short-circuits the subprocess so a crashed job resumes.
 """
 from __future__ import annotations
 
@@ -45,18 +21,13 @@ from policy.dataset import QualityTask, quality_subset
 # vLLM-Omni's OpenPI websocket route (verified 0.24.0: vllm_omni/entrypoints/openpi/).
 OPENPI_ROUTE = "/v1/realtime/robot/openpi"
 
-# Runner entrypoint + client policy, relative to the RoboLab checkout. `pi05` selects
-# RoboLab's openpi websocket client packing — the actual policy is the SERVER (Cosmos);
-# the client flag only picks the observation packing. VERIFY both on-box.
+# The client flag only picks the observation packing; the actual policy is the SERVER (Cosmos).
 DEFAULT_RUNNER = "policies/pi0_family/run.py"
 DEFAULT_CLIENT_POLICY = "pi05"
 
 TASK_MAP_PATH = Path(__file__).resolve().parent.parent / "config" / "robolab_tasks.yaml"
 
-# Episodes run as parallel sim envs, every subset task caps at <=90 s, and the whole eval
-# budgets <1 h per endpoint (two parallel L40S jobs) — so one task should take minutes.
-# 15 min covers scene load + inference stalls while stopping a hung sim from eating the
-# budget; ROBOLAB_TASK_TIMEOUT_S overrides for slow first-run asset downloads.
+# 15 min covers scene load + inference stalls; ROBOLAB_TASK_TIMEOUT_S overrides for slow downloads.
 TASK_TIMEOUT_S = float(os.environ.get("ROBOLAB_TASK_TIMEOUT_S", 900))
 
 
@@ -97,9 +68,8 @@ def rollout_cmd(robolab_root: Path, task_name: str, episodes: int, uri: str,
                 runner: str | None = None, client_policy: str | None = None) -> list[str]:
     """The RoboLab runner invocation for one task (flags per the pi0_family README).
 
-    Job-level env knobs (like TENSOR_PARALLEL_SIZE in policy/serving.py): ROBOLAB_PYTHON —
-    the image's Isaac interpreter, NOT our uv venv (Isaac Lab lives in the kit env);
-    ROBOLAB_RUNNER / ROBOLAB_CLIENT_POLICY override the entrypoint / client packing."""
+    ROBOLAB_PYTHON must be the image's Isaac interpreter, NOT our uv venv (Isaac Lab lives
+    in the kit env); ROBOLAB_RUNNER / ROBOLAB_CLIENT_POLICY override the entrypoint / packing."""
     python = python or os.environ.get("ROBOLAB_PYTHON") or sys.executable
     runner = runner or os.environ.get("ROBOLAB_RUNNER") or DEFAULT_RUNNER
     client_policy = client_policy or os.environ.get("ROBOLAB_CLIENT_POLICY") or DEFAULT_CLIENT_POLICY
@@ -112,11 +82,7 @@ def rollout_cmd(robolab_root: Path, task_name: str, episodes: int, uri: str,
             "--output-folder-name", run_name]
 
 
-# ---------------------------------------------------------------------------
-# Rollout-output parsing. RoboLab's success-metrics JSON schema is unpublished; accept
-# the plausible shapes (rate field / success+episode counters / per-episode lists) and
-# fail loudly otherwise — never guess a number.
-# ---------------------------------------------------------------------------
+# RoboLab's success-metrics JSON schema is unpublished; accept plausible shapes, never guess.
 _NAME_HINTS = ("success", "summary", "metric", "result", "eval")
 _COUNT_KEYS = ("episodes", "num_runs", "num_episodes", "trials", "num_trials")
 
@@ -179,7 +145,6 @@ def run_task(config: Config, qtask: QualityTask, task_name: str, *, robolab_root
     record_path = Path(rollout_dir) / config.cid / f"{qtask.task}.json"
     if record_path.exists():
         return json.loads(record_path.read_text())      # resume: never re-simulate
-    # Only an actual rollout needs the checkout — the gate run resumes from records alone.
     if not Path(robolab_root).is_dir():
         raise FileNotFoundError(
             f"no record for {config.cid}/{qtask.task} and no RoboLab checkout at "
@@ -200,8 +165,7 @@ def run_task(config: Config, qtask: QualityTask, task_name: str, *, robolab_root
         raise RuntimeError(f"RoboLab rollout failed for {task_name} "
                            f"(exit {proc.returncode}) — see {log_path}")
 
-    # --output-folder-name names the run under output/ (VERIFY exact layout on-box);
-    # match loosely and take the newest so a timestamp prefix/suffix still resolves.
+    # Match loosely and take the newest so a timestamp prefix/suffix still resolves.
     out_dirs = sorted((Path(robolab_root) / "output").glob(f"*{run_name}*"),
                       key=lambda p: p.stat().st_mtime)
     if not out_dirs:

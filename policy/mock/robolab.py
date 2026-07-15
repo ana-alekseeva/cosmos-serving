@@ -1,11 +1,4 @@
-"""Modeled RoboLab task success (MOCK).
-
-The real RoboLab gate drives Isaac Sim / Isaac Lab on an RT-core GPU and measures task
-success from executing the generated actions (policy/robolab.py::_run_real_robolab). This
-module models per-task success offline so the gate logic + report render with no simulator:
-the lossy techniques (Cache-DiT, FP8) apply a small success penalty that stays below the
-rejection threshold, and difficulty sets the baseline success rate.
-"""
+"""Modeled RoboLab task success (MOCK): offline per-task success so the gate renders with no simulator."""
 from __future__ import annotations
 
 import random

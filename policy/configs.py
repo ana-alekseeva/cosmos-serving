@@ -1,30 +1,11 @@
 """The optimization configuration matrix.
 
-Three waterfalls, all single-GPU, batch size 1:
+Two waterfalls, all single-GPU, batch size 1:
+  Native-PyTorch reference  P0 -> P3   (R+G merged — one MoT)
+  End-to-end cumulative     E0 -> E4   (vLLM stack)
 
-  Native-PyTorch reference waterfall  P0 -> P3   (measures `total_chunk_ms`; R+G merged — one MoT)
-  End-to-end cumulative waterfall     E0 -> E4   (measures `total_chunk_ms`, vLLM stack)
-
-Attention baseline: the native-PyTorch reference path (P) runs on cosmos_framework, whose
-attention dispatcher has NO math/SDPA backend — only fused kernels (flash2/flash3/cuDNN/NATTEN).
-So the R/G baseline is torch-native cuDNN *fused* attention (flash-class), forced via
-I4_ATTN_BACKENDS=cudnn (policy/pytorch_engine.py); there is no separate math baseline or "+Flash"
-rung. The math-vs-flash comparison is realizable only on the vLLM E-ladder (E0 TORCH_SDPA -> E1
-FLASH_ATTN, policy/serving.py), which is why it is retained there.
-
-Each rung adds one technique to the previous one (cumulative):
-
-    Baseline eager -> Flash Attention -> torch.compile -> CUDA graphs
-      -> FP8 -> Final
-
-Multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel) are deliberately NOT on
-these ladders — the spec runs them as a separate experiment (policy/multigpu.py).
-
-`stage_multipliers` / `stage_flags` drive the two backends:
-  - MockPolicyEngine reads `stage_multipliers` to model per-stage latency with no GPU.
-  - The real vLLM/vLLM-Omni + eager path reads `stage_flags` (engine/attention/compile
-    knobs). Numbers are anchored to the report where it gives them and to the example
-    log; the real backend measures wall-clock and overwrites the model.
+Each rung cumulatively adds one technique. `stage_multipliers` drives the mock backend;
+`stage_flags` drives the real vLLM/eager backend.
 """
 from __future__ import annotations
 
@@ -36,13 +17,7 @@ from policy.config import (  # single source of truth (experiment.yaml)
     ReasonerSampling,
 )
 
-# ---------------------------------------------------------------------------
-# Pipeline stages (stage breakdown / latency fields).
-# ---------------------------------------------------------------------------
-# Two waterfalls. The old reasoner (R) and generator (G) ladders both measured the SAME single
-# MoT inference (Cosmos3VFMNetwork — one net forward), so on-box they produced identical numbers;
-# they are merged into ONE native-PyTorch reference ladder P. E is the end-to-end vLLM
-# ladder.
+# R and G ladders measured the SAME single MoT inference -> merged into ONE native ladder P.
 NATIVE = "native"
 END_TO_END = "end_to_end"
 WATERFALLS = (NATIVE, END_TO_END)
@@ -60,14 +35,10 @@ STAGES = (
 # Fixed action-chunk geometry — the only evaluated task: 32 timesteps x 8 DoF.
 ACTION_CHUNK = CONFIG.dataset.action_chunk
 
-# Sampling recipes — from the single config file. The dataclasses are re-exported so callers
-# can keep importing the recipes (and their types) from here alongside the ladder.
 REASONER_SAMPLING = CONFIG.reasoner_sampling      # Qwen3-VL conditioning decode params
 GENERATOR_SAMPLING = CONFIG.generator_sampling    # action-diffusion recipe
 
-# Diffusion steps for one action-denoising trajectory = the sampling recipe's step count.
-# Static ("static shapes") so CUDA-graph configs can capture the loop; denoising_step_ms
-# is an array of this length.
+# Static shape so CUDA-graph configs can capture the loop.
 N_DENOISE_STEPS = GENERATOR_SAMPLING.steps
 
 
@@ -86,27 +57,7 @@ class Config:
     note: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Cumulative *technique* effects. Each technique multiplies the eager cost of the
-# stage(s) it touches (divisor > 1 == faster). Cumulative = product along the ladder.
-#
-# Anchors:
-#   - Flash/fused attention (E-ladder / vLLM only): attention-bound stages shrink (reasoner
-#     ~1.30, denoise ~1.25). The P reference path is already cuDNN-fused, so it has no such rung.
-#   - torch.compile: kernel fusion + less host overhead (~1.12-1.15).
-#   - CUDA graph replay: removes per-launch overhead; big when the loop is many small
-#     kernels (denoise ~1.15), modest on the VLM prefill (~1.10). Not double-counted with
-#     compile — measured as the *additional* drop over compile.
-#   - Reasoner conditioning cache (P3 / E4): conditioning is invariant across the denoising
-#     trajectory, so compute it ONCE per observation instead of every step. In the naive
-#     baseline the conditioning is recomputed each of N_DENOISE_STEPS steps; caching removes
-#     the (N-1)x. Modeled by `reasoner_cached` (see policy/pipeline.py). Must be invalidated
-#     per new observation.
-#   - Cache-DiT (E5, lossy): reuse cached DiT block outputs across adjacent steps ->
-#     fewer effective step-compute (~1.40 on the denoise loop).
-#   - FP8 (E4, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
-#     peak memory.
-# ---------------------------------------------------------------------------
+# Cumulative technique speedup divisors (>1 == faster); mock-model anchors only.
 _FLASH_REASONER = 1.30
 _FLASH_DENOISE = 1.25
 _COMPILE_REASONER = 1.15
@@ -124,11 +75,7 @@ def _mul(d: dict, stage: str, factor: float) -> None:
 
 
 # ---- Native-PyTorch reference waterfall: P0 -> P3 ---------------------------------
-# ONE ladder for the native path. The old reasoner (R) + generator (G) ladders ran the
-# SAME single MoT inference (Cosmos3VFMNetwork) and gave identical on-box numbers, so they are
-# merged here. cuDNN fused-attention baseline (no math / "+Flash" rung — the framework has no math
-# backend); each rung CUMULATIVELY adds one native technique. Cache-DiT + FP8 are vLLM-Omni-only
-# and live on the E ladder — keeping them off P avoids a mid-waterfall backend switch.
+# cuDNN fused-attention baseline (framework has no math backend, so no "+Flash" rung).
 def _native_ladder() -> list[Config]:
     mr: dict = {}   # reasoner_conditioning multipliers
     mg: dict = {}   # generator (prepare + denoise) multipliers
@@ -162,17 +109,9 @@ def _native_ladder() -> list[Config]:
 
 
 # ---- End-to-end cumulative waterfall: E0 -> E4 ------------------------------------
-# Applied across BOTH towers cumulatively: Baseline eager -> Flash -> compile ->
-# CUDA graphs -> FP8 -> Final. Two rungs were REMOVED after the H100 Job 2 measurements
-# (2026-07-15):
-#   * Cache-DiT: its warmup window (W=4) equals the whole 4-step schedule so the cache
-#     never activates, AND its BlockAdapter bypasses the compiled transformer at runtime
-#     (80.6% of kernel time executed eager under adapter frames vs 82% fused on the
-#     CUDA-graphs rung) — +170ms for nothing. The engine still supports the flag
-#     (stage_flags cache_dit -> --cache-backend cache_dit) for one-off comparisons.
-#   * Reasoner conditioning cache: not implementable on stock vllm-omni (no cross-request
-#     cache; measured identical to the CUDA-graphs rung). It remains a NATIVE-ladder rung
-#     (P3) and a proposed vllm-omni patch.
+# Cache-DiT and reasoner-conditioning-cache rungs were REMOVED after H100 Job 2 (2026-07-15):
+# Cache-DiT never activates at W=4 and bypasses the compiled transformer; conditioning cache
+# is not implementable on stock vllm-omni. The engine still supports the cache_dit flag.
 def _end_to_end_ladder() -> list[Config]:
     mr: dict = {}   # reasoner_conditioning multipliers
     mg: dict = {}   # generator (prepare + denoise) multipliers

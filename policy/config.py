@@ -1,25 +1,6 @@
 """Single source of truth for every run parameter (config/experiment.yaml).
 
-ALL parameters that govern a run live in one file — `config/experiment.yaml` — so you can
-read what a run used without opening each module. This module loads that YAML ONCE at
-import and exposes it as `CONFIG`; every other module pulls its numbers from here instead
-of hard-coding them, so the file and the code cannot drift.
-
-Sections (see config/experiment.yaml):
-    run                — run id, model, backend, endpoint, paths, bias controls
-    dataset            — DROID observation shapes + RoboLab quality-subset structure
-    generator_sampling — action-diffusion recipe: steps / guidance / shift / CFG mode
-    measurement        — warm-ups, min measured, percentiles
-    quality_gate       — lossy-technique accept/reject thresholds
-
-What is deliberately NOT here (per design): the mock simulator's internal anchors — the
-per-stage cost table and per-technique speedup multipliers (policy/pipeline.py,
-policy/configs.py, policy/multigpu.py). Those are the *model's* placeholder numbers, thrown
-away the moment the real vLLM / vLLM-Omni backend measures wall-clock on the GPU; they are
-not "parameters of a run". Everything a human would call a hyperparameter is here.
-
-NB: distinct from policy/configs.py, which builds the optimization ladders (P0-P3,
-E0-E4) from those simulator anchors. This module only holds declarative parameters.
+Loads config/experiment.yaml ONCE at import and exposes it as `CONFIG`.
 """
 from __future__ import annotations
 
@@ -28,8 +9,6 @@ from pathlib import Path
 
 import yaml
 
-# The one config file. Shipped in-repo as the canonical record; load_config(path) can point
-# at another copy (run_matrix.py --config ...).
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "experiment.yaml"
 
 
@@ -54,8 +33,7 @@ class RunConfig:
 
 @dataclass(frozen=True)
 class DatasetConfig:
-    """DROID observation shapes (static → CUDA-graph friendly) + RoboLab quality subset
-    structure. Shapes are fixed across the replay set; the subset is 3×3×2 stratified."""
+    """DROID observation shapes (static → CUDA-graph friendly) + RoboLab quality subset."""
     camera_views: tuple = ("exterior", "wrist")   # DROID convention: exterior + wrist
     image_hw: tuple = (180, 320)                  # per-view RGB fed to the reasoner (VERIFY on-box)
     proprio_dim: int = 8                          # joint pos/vel + gripper
@@ -73,11 +51,8 @@ class DatasetConfig:
 class GeneratorSampling:
     """Generator (action-diffusion) sampling recipe for Cosmos3-Nano-Policy-DROID.
 
-    Model-level inference hyperparameters, NOT per-rung optimization knobs: the whole
-    generator/end-to-end waterfall samples with the SAME recipe, so the optimization
-    techniques — and not a changed schedule — explain the latency deltas. `steps` is the
-    denoising-loop length and therefore a static shape the CUDA-graph rungs capture;
-    `denoising_step_ms` is an array of this length. Logged into environment.json."""
+    Same recipe across the whole waterfall so techniques (not a changed schedule) explain
+    latency deltas. `steps` is a static shape the CUDA-graph rungs capture."""
     steps: int = 4                      # denoising / flow-matching steps per action chunk
     guidance: float = 3.0              # classifier-free guidance scale
     shift: float = 5.0                 # flow-matching timestep-schedule shift
@@ -85,20 +60,14 @@ class GeneratorSampling:
 
     @property
     def uses_cfg(self) -> bool:
-        """CFG active (a real CFG mode with guidance>1) -> the CFG-Parallel multi-GPU
-        experiment applies (policy/multigpu.py)."""
+        """CFG active -> the CFG-Parallel multi-GPU experiment applies."""
         return self.cfg_mode != "none" and self.guidance > 1.0
 
 
 @dataclass(frozen=True)
 class ReasonerSampling:
-    """Reasoner (Qwen3-VL conditioning) decode parameters for Cosmos3-Nano-Policy-DROID.
-
-    The Reasoner is measured ONLY as action-policy conditioning — it does NOT generate
-    standalone text. Decoding is deterministic (temperature 0)
-    so the conditioning — and therefore the logged action chunk — is reproducible. These
-    are the vLLM SamplingParams for the conditioning pass; VERIFY the canonical values on-box,
-    especially `max_tokens` (the conditioning-token budget per observation)."""
+    """Reasoner (Qwen3-VL conditioning) decode params. Measured ONLY as conditioning, not
+    standalone text; deterministic (temperature 0) for reproducibility."""
     max_tokens: int = 256          # conditioning-token budget per observation (VERIFY on-box)
     temperature: float = 0.0       # greedy / deterministic conditioning (reproducible)
     top_p: float = 1.0             # no nucleus truncation (inactive at temperature 0)
@@ -107,14 +76,12 @@ class ReasonerSampling:
 
     @property
     def greedy(self) -> bool:
-        """Deterministic decode (temperature 0) -> reproducible conditioning."""
         return self.temperature == 0.0
 
 
 @dataclass(frozen=True)
 class MeasurementConfig:
-    """Latency best practice: batch 1, ~50 warm-ups (excluded), measured = replay_size (the
-    50 unique real obs, once each), p50/p90/p99 summaries (p99 rough at n=50)."""
+    """Batch 1, ~50 warm-ups (excluded), measured = replay_size, p50/p90/p99 (p99 rough at n=50)."""
     warmup_requests: int = 50
     min_measured_requests: int = 50
     percentiles: tuple = (50, 90, 99)
@@ -163,8 +130,7 @@ def _build(cls: type, data: dict):
 
 
 def load_config(path: str | Path | None = None) -> Settings:
-    """Load the single config file into `Settings` (code defaults fill any absent section/key,
-    so the harness runs with no YAML at all). Rejects unknown sections/keys to catch typos."""
+    """Load the config file into `Settings` (code defaults fill absent sections/keys)."""
     p = Path(path) if path else CONFIG_PATH
     if not p.exists():
         return Settings()
@@ -175,5 +141,4 @@ def load_config(path: str | Path | None = None) -> Settings:
     return Settings(**{name: _build(cls, data.get(name) or {}) for name, cls in _SECTIONS.items()})
 
 
-# The loaded singleton every module reads from. Import-safe (only stdlib + yaml).
 CONFIG: Settings = load_config()

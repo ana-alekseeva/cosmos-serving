@@ -1,12 +1,7 @@
-"""Run-facing view of the single config file (config/experiment.yaml).
+"""Run-facing view of the config file: projects the sectioned `CONFIG` into a FLAT
+`Experiment` (exp.replay_size, exp.warmup_requests, ...) and applies CLI overrides.
 
-`policy/config.py` is the single source of truth (sectioned: run / dataset /
-generator_sampling / measurement / quality_gate). This module projects the run-relevant
-values into a FLAT `Experiment` — the shape run_matrix.py / policy.matrix / policy.runner
-already consume (exp.replay_size, exp.warmup_requests, ...) — and applies CLI overrides.
-
-CLI flags override the file; the file overrides code defaults; with no YAML at all the code
-defaults (in policy/config.py) still run the harness.
+CLI flags override the file; the file overrides code defaults.
 """
 from __future__ import annotations
 

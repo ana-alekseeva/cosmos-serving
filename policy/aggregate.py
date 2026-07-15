@@ -1,17 +1,4 @@
-"""Aggregation job (required outputs).
-
-A small CPU job that merges every per-configuration subprocess output and generates:
-
-  * CSV (+ Parquet if pandas/pyarrow present) per-configuration summaries
-  * Waterfall data — native PyTorch (P0-P3), end-to-end vLLM (E0-E4),
-    each with cumulative (vs baseline) and marginal (vs prev) speedups
-  * Confidence intervals (numpy bootstrap over the raw per-request samples)
-  * Stage breakdown for baseline and final (the six stages)
-  * Quality-comparison tables (the lossy Cache-DiT / FP8 gate)
-  * Figures (policy/plots.py)
-
-Reads only the JSONL + summary.json each subprocess wrote; no GPU needed.
-"""
+"""Aggregation job: merge per-configuration subprocess outputs into CSV/Parquet/JSON/figures."""
 from __future__ import annotations
 
 import csv
@@ -29,13 +16,11 @@ from policy.configs import (
 )
 from policy.logs import read_jsonl
 
-# The per-request metric each waterfall reduces (built from the JSONL latency block).
 WATERFALL_METRIC = {
     NATIVE: ("total_chunk_ms", "native PyTorch: observation → 32-action chunk (ms)"),
     END_TO_END: ("total_chunk_ms", "vLLM stack: observation → 32-action chunk (ms)"),
 }
 
-# JSONL latency_ms block -> the six stage-breakdown buckets.
 STAGE_BUCKETS = {
     "preprocess": ("preprocess", "h2d"),
     "reasoner_conditioning": ("reasoner",),
@@ -83,8 +68,8 @@ class ConfigResult:
     lossy: bool
     ok: bool
     n: int
-    rows: list = field(default_factory=list)          # raw JSONL rows
-    summary: dict = field(default_factory=dict)        # summary.json
+    rows: list = field(default_factory=list)
+    summary: dict = field(default_factory=dict)
     drift: float | None = None
     quality_gate: str = "n/a"
 
@@ -140,8 +125,7 @@ def build_waterfall(results: dict[str, ConfigResult], waterfall: str) -> dict:
 
 
 def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
-    """Baseline vs final per-stage p50 — the stage breakdown. Prefers the E ladder (E0 vs final);
-    a native-only run (P configs, e.g. Job 1) falls back to the P ladder instead of emitting {}."""
+    """Baseline vs final per-stage p50. Prefers the E ladder; falls back to P for native-only runs."""
     rungs = next((r for r in ([c for c in ladder(wf) if c.cid in results] for wf in (END_TO_END, NATIVE)) if r), None)
     if not rungs:
         return {}
@@ -168,7 +152,7 @@ def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
 def build_quality_comparison(results: dict[str, ConfigResult]) -> dict:
     """Lossy-technique gate: Cache-DiT / FP8 rungs, their drift, gate verdict, speedup."""
     rows = []
-    for wf in WATERFALLS:                                  # lossy rungs live on E (Cache-DiT/FP8)
+    for wf in WATERFALLS:
         rungs = [c for c in ladder(wf) if c.cid in results]
         if not rungs:
             continue

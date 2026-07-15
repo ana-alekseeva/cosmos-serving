@@ -9,7 +9,6 @@ run:
   output_dir: results
   torchinductor_root: /tmp/torchinductor   # per-config subdir /tmp/torchinductor/<cid>
   configurations: []                    # cids to run; [] = full matrix (P0-P3, E0-E4)
-  # bias controls for one long provisioned job:
   baseline_at_start_and_end: true
   randomize_order: true
   order_seed: 7
@@ -23,25 +22,15 @@ dataset:
   proprio_dim: 8                        # joint pos/vel + gripper
   instruction_tokens: 32                # tokenized language-instruction length (bucketed)
   action_chunk: [32, 8]                 # the only evaluated task: 32 timesteps × 8 DoF
-  replay_size: 50                       # MEASURED requests/config = the 50 unique real obs, once
-                                        # each (no cycling). Solid p50, ok p90; p99 is rough at
-                                        # n=50. Raise this to cycle the set for tighter tails.
+  replay_size: 50                       # MEASURED requests/config = the 50 unique real obs, once each (no cycling)
   replay_seed: 20260713                 # deterministic → reproducible logs
-  # Stratified subset: 3 capability groups × 3 difficulty × 2 tasks = 18 tasks, 10 eps each.
-  # Groups are RoboLab's own attribute families (its task_report.txt): visual (color/
-  # semantics/size), relational (spatial/conjunction/counting), procedural (affordance/
-  # reorientation/sorting/stacking). The benchmark has NO articulated-object or true
-  # tool-USE tasks, so the spec's placeholder groups could not map honestly onto it.
-  # Slot -> real RoboLab task name: config/robolab_tasks.yaml (selection rationale there).
+  # Stratified subset: 3 capability groups × 3 difficulty × 2 tasks; slot -> task in config/robolab_tasks.yaml.
   capability_groups: [visual, relational, procedural]
   difficulty_levels: [easy, medium, hard]
   tasks_per_cell: 2
   episodes_per_task: 10
 
 # --- Reasoner (Qwen3-VL) conditioning decode params ------------------------------------
-# The Reasoner is measured ONLY as action-policy conditioning; it does NOT generate
-# standalone text. Decoding is deterministic (temperature 0) so conditioning — and the
-# logged action chunk — is reproducible. vLLM SamplingParams; VERIFY values on-box.
 reasoner_sampling:
   max_tokens: 256          # conditioning-token budget per observation (VERIFY on-box)
   temperature: 0.0         # greedy / deterministic conditioning (reproducible logs)
@@ -57,8 +46,6 @@ generator_sampling:
   cfg_mode: full-range-null   # CFG over the full step range against a null (uncond) branch
 
 # --- Measurement (latency best practice): batch 1, ~50 warm-ups, p50/p90/p99 --------
-# Warm-ups discarded (CUDA context / compile / autotune / cache). Measured = replay_size (the
-# 50 unique real obs). p50 primary, p90 ok, p99 indicative at n=50.
 measurement:
   warmup_requests: 50
   min_measured_requests: 50

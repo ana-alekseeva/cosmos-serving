@@ -1,15 +1,4 @@
-"""Policy inference pipeline — REAL backend + engine factory.
-
-One request = one DROID observation -> one 32x8 action chunk.
-
-  - VLLMPolicyEngine: real path — sends each replay request to the deployed vLLM (Reasoner)
-    / vLLM-Omni (Generator/full policy) endpoint, reads server-side per-stage timers, adds
-    client-side transport. Written against the serving contract; every `# VERIFY` confirmed
-    on-box.
-
-The MOCK backend (modeled per-stage latency, no GPU) lives in policy/mock/engine.py;
-`make_engine` wires it in for `--backend mock`.
-"""
+"""Policy inference pipeline — REAL backend + engine factory. One request = one DROID observation -> one 32x8 action chunk."""
 from __future__ import annotations
 
 import warnings
@@ -25,10 +14,7 @@ from policy.pytorch_engine import PyTorchPolicyEngine
 class VLLMPolicyEngine:
     """Real backend: replay each DROID request against the deployed policy endpoint.
 
-    ONE vllm-omni engine serves both towers (the Qwen3-VL Reasoner and the diffusion action
-    expert live inside the stock Cosmos3OmniDiffusersPipeline) — "Reasoner/Generator" name
-    phases within a request, not separate deployments. Timing is client-measured
-    total_chunk_ms; per-stage attribution comes from profiler traces (capture_profile).
+    ONE vllm-omni engine serves both towers; "Reasoner/Generator" name phases within a request.
     """
 
     backend = "vllm"
@@ -43,23 +29,17 @@ class VLLMPolicyEngine:
     def prepare(self) -> None:
         import os
 
-        compat.validate(self.config, "vllm")                 # vLLM-Omni technique set
-        for pair, why in compat.conflicts(self.config):      # warn on non-composing pairs
+        compat.validate(self.config, "vllm")
+        for pair, why in compat.conflicts(self.config):
             names = " + ".join(compat.TECHNIQUES[k][0] for k in pair)
             warnings.warn(f"{self.config.cid}: {names} — {why}", stacklevel=2)
         if self.endpoint:                   # externally-deployed endpoint: nothing to launch
             return
-        # GPU-op traces (the vLLM analogue of the native path's Perfetto traces): serving.py
-        # turns VLLM_TORCH_PROFILER_DIR into the --profiler-config engine flag (the env var
-        # itself was removed from vllm 0.19.1); traces flush on /stop_profile (capture_profile
-        # below). Point it at a per-config SUBDIR so trace_E0 vs trace_E4 are attributable —
-        # safe to mutate os.environ: each config runs in its own subprocess, and
-        # engine_args() reads it at launch time.
+        # Per-config SUBDIR so traces are attributable; safe to mutate os.environ (per-config subprocess).
         base = os.environ.get("VLLM_TORCH_PROFILER_DIR")
         if base:
             os.environ["VLLM_TORCH_PROFILER_DIR"] = os.path.join(base, self.config.cid)
             os.makedirs(os.environ["VLLM_TORCH_PROFILER_DIR"], exist_ok=True)
-        # VERIFY: launch vLLM-Omni with this config's engine flags (bench serving contract).
         from policy.serving import start_policy_server
         self._server = start_policy_server(self.model, self.config)
         self.endpoint = self._server.base_url
@@ -73,16 +53,9 @@ class VLLMPolicyEngine:
         t0 = time.perf_counter()
         resp = submit_policy_request(self.endpoint, self.model, req, self.config)
         total_ms = (time.perf_counter() - t0) * 1e3
-        # The completed async job record carries SERVER-side timing: inference_time_s (the
-        # authoritative server total) and stage_durations (per-omni-stage seconds). Map the
-        # omni stages onto our latency fields heuristically (AR/reasoner-ish -> reasoner_ms,
-        # diffusion-ish -> denoising_ms); finer attribution comes from profiler traces
-        # (capture_profile). total_chunk_ms stays client-measured (includes <=25ms poll noise).
+        # inference_time_s is the authoritative server total; total_chunk_ms stays client-measured.
         server = float(resp.get("inference_time_s", total_ms / 1e3)) * 1e3
-        # Verified stage_durations keys (0.24.0): queue_wait_ms + stage_N_gen_ms — values
-        # already in ms, ONE omni stage hosting both towers, so no reasoner/denoise split
-        # here (that attribution comes from profiler traces). We fold generation time into
-        # denoising_ms as "the policy forward" and leave finer stages at 0.
+        # stage_durations values already in ms; fold *_gen_ms into denoising_ms (one omni stage, both towers).
         stages = resp.get("stage_durations") or {}
         denoising_ms = sum(float(v) for k, v in stages.items()
                            if str(k).endswith("_gen_ms")) if isinstance(stages, dict) else 0.0
@@ -105,20 +78,18 @@ class VLLMPolicyEngine:
         )
 
     def capture_profile(self, req: DroidRequest) -> None:
-        """One EXTRA request under vLLM's server-side torch profiler — the GPU-op trace (Perfetto
-        dashboard) for this config. Called by the runner AFTER the measured pass, so profiler
-        overhead never contaminates the latency records. No-ops unless the server was launched
-        with VLLM_TORCH_PROFILER_DIR set (run_job.sh sets it for BACKEND=vllm)."""
+        """One EXTRA profiled request AFTER the measured pass, so profiler overhead never
+        contaminates the records. No-ops unless VLLM_TORCH_PROFILER_DIR is set."""
         import os
 
         if not os.environ.get("VLLM_TORCH_PROFILER_DIR") or self.endpoint is None:
             return
         from policy.serving import start_profile, stop_profile
-        start_profile(self.endpoint)                  # VERIFY the /start_profile route on-box
+        start_profile(self.endpoint)
         try:
             self.run_request(req)                     # traced request; record discarded
         finally:
-            stop_profile(self.endpoint)               # server flushes the Chrome trace
+            stop_profile(self.endpoint)
 
     def close(self) -> None:
         if self._server is not None:

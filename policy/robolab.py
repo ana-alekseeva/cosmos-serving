@@ -1,20 +1,4 @@
-"""RoboLab quality evaluation.
-
-The waterfalls optimize *latency*; RoboLab confirms the lossy techniques (Cache-DiT, FP8)
-don't damage *policy performance*, measured as task success from executing the generated
-actions — not a pixel proxy ("evaluated by executing its generated actions in RoboLab").
-
-  * Job 3 — subset: the stratified 18-task subset, 10 episodes each, for
-    {baseline, final optimized PyTorch, final production}. Rejects an optimization that
-    regresses success beyond the threshold.
-  * Job 4 — full: the complete RoboLab benchmark for {baseline, final production} only,
-    run after the subset passes.
-
-The mock models per-task success so the gate logic + report render with no simulator. The
-real path (policy/robolab_runner.py, launched by jobs/job3-robolab-subset.sky.yaml) drives
-RoboLab rollouts on the Isaac box against a deployed endpoint's OpenPI websocket route and
-gates on measured task success.
-"""
+"""RoboLab quality evaluation: gates the lossy techniques on measured task success."""
 from __future__ import annotations
 
 import json
@@ -24,8 +8,7 @@ from policy.config import CONFIG
 from policy.configs import Config, config_by_id
 from policy.dataset import QualityTask, quality_subset
 
-# Success-drop gate threshold — a run parameter from the single config file
-# (config/experiment.yaml -> quality_gate). Reject if success drops by more than this.
+# Reject if success drops by more than this (run parameter from config/experiment.yaml).
 SUCCESS_DROP_THRESHOLD = CONFIG.quality_gate.robolab_success_drop
 
 
@@ -40,7 +23,7 @@ def run_quality_subset(config: Config, *, backend: str = "mock",
     if backend != "mock":
         return _run_real_robolab(config, endpoint, subset, robolab_root=robolab_root,
                                  rollout_dir=rollout_dir, episodes=episodes)
-    from policy.mock.robolab import config_success              # modeled success (no simulator)
+    from policy.mock.robolab import config_success
     per_task = []
     for t in subset:
         s = config_success(t, config, seed=seed)
@@ -78,9 +61,7 @@ def _run_real_robolab(config: Config, endpoint: str | None, subset, *,
                       robolab_root: Path | None = None,
                       rollout_dir: Path | None = None,
                       episodes: int | None = None) -> dict:
-    """Real RoboLab eval — Isaac Sim/Isaac Lab on an RT-core box (Job 3), rollouts
-    against the endpoint's OpenPI websocket route. Import stays local: the driver is
-    Isaac-box-only and the mock path must not pay for it."""
+    """Real RoboLab eval (Job 3). Import stays local: the driver is Isaac-box-only."""
     from policy.robolab_runner import run_quality_subset_real
 
     if robolab_root is None:

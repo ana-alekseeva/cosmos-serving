@@ -1,14 +1,6 @@
-# Serve nvidia/Cosmos3-Nano-Policy-DROID as a Nebius serverless endpoint, with the
-# ablation-winning latency optimizations baked into the serving engine.
-#
-# INFRA PROVISIONING ONLY. This config tells the workbench (npa) what endpoint to stand up and
-# which engine flags to bake in. The ablation that PICKS those flags (run_matrix.py + aggregate.py)
-# and the RoboLab task-success gate that guards them (run_robolab.py / jobs/job3-robolab-subset)
-# both live in the repository, not in this config.
-#
-# The only evaluated task: DROID camera observations + language instruction + proprioceptive
-# state -> 32x8 robot-action chunk. Reasoner served by vLLM (Qwen3-VL path); Generator / full
-# policy by vLLM-Omni.
+# Serve Cosmos3-Nano-Policy-DROID as a Nebius serverless endpoint with the ablation-winning
+# optimizations baked in. INFRA PROVISIONING ONLY — the ablation (run_matrix.py + aggregate.py)
+# and the RoboLab gate (run_robolab.py) that picks/guards these flags live in the repo.
 
 serve:
   model: nvidia/Cosmos3-Nano-Policy-DROID   # https://huggingface.co/nvidia/Cosmos3-Nano-Policy-DROID
@@ -17,8 +9,7 @@ serve:
   gpu_preset: 1gpu-16vcpu-200gb              # one-H100 preset
   project: serverless-challenge
   name: cosmos-policy
-  # The final end-to-end configuration is E4: FlashAttention + torch.compile + CUDA graphs
-  # + FP8. These are the engine arguments produced by policy/serving.py::engine_args(E4).
+  # Final end-to-end config E4 (FlashAttention + torch.compile + CUDA graphs + FP8); args from policy/serving.py::engine_args(E4).
   configuration: E4
   engine_args:
     - --diffusion-attention-config.per_role.self.backend FLASH_ATTN
