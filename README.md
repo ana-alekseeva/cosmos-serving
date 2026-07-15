@@ -1,10 +1,32 @@
 # cosmos-serving — Cosmos3-Nano-Policy-DROID latency validation
 
-Validate and analyze the inference latency of **`Cosmos3-Nano-Policy-DROID`** through the
-production **vLLM / vLLM-Omni** serving stack, and gate the lossy optimization (FP8) on
-**RoboLab** task success.
+**A robot cannot wait for the next token.** To place an object on a shelf, a policy must
+combine two exterior-camera views, a wrist-camera view, a language instruction, and the
+robot's state, then return the next actions quickly enough to stay inside the control loop.
+Cosmos 3 brings that reasoning and action generation into one model, but its multimodal
+Reasoner and diffusion-based Generator make serving substantially more involved than
+serving a conventional LLM.
 
-The repo is scoped to two cloud jobs plus local analysis:
+<table>
+  <tr>
+    <td width="33%"><img src="docs/assets/droid_exterior_1.png" alt="DROID exterior camera 1 showing a Franka robot arm, a yellow cup, and the target object."></td>
+    <td width="33%"><img src="docs/assets/droid_exterior_2.png" alt="DROID exterior camera 2 showing the robot workspace from a second angle."></td>
+    <td width="33%"><img src="docs/assets/droid_wrist.png" alt="DROID wrist camera showing the gripper approaching the target object."></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Exterior camera 1</sub></td>
+    <td align="center"><sub>Exterior camera 2</sub></td>
+    <td align="center"><sub>Wrist camera</sub></td>
+  </tr>
+</table>
+
+This project turns that question into a practical workflow: **how much latency can we
+remove without making the robot worse?** The repository already contains the benchmark
+matrix, cloud-job definitions, serving configuration, trace analysis, and plotting code.
+You can check the complete pipeline locally without a GPU, then launch the real benchmark
+as one cloud job when you are ready.
+
+There are two ready-to-run cloud workflows:
 
 | Job | File | What it does |
 |---|---|---|
@@ -14,11 +36,31 @@ The repo is scoped to two cloud jobs plus local analysis:
 The optimization ladder (`E0..E4`) is defined in [policy/configs.py](policy/configs.py):
 `E0` eager (SDPA) → `E1` +Flash Attention → `E2` +torch.compile → `E3` +CUDA graphs → `E4` +FP8 (lossy).
 
-Managed with [uv](https://docs.astral.sh/uv/).
+**Most users can start with the local smoke test and Job 2.** Deploy Job 3 only when you
+also want to verify that the faster FP8 policy preserves task success in RoboLab.
+
+## Start here: try the pipeline locally
+
+No GPU or cloud account is needed for this first run. The mock backend exercises the same
+benchmark, logging, aggregation, and plotting flow without loading the model:
+
+```bash
+uv sync
+uv run python run_matrix.py --smoke --input-manifest policy/mock/manifest.json \
+  --output-dir results-smoke --backend mock \
+  --configurations E0,E1,E2,E3,E4
+uv run python aggregate.py --out-dir results-smoke
+```
+
+The generated figures and summaries appear in `results-smoke/aggregate/`. To check the
+repository itself as well, run `uv run --group dev pytest -q`.
 
 ---
 
-## 0. One-time setup
+## Prepare for a cloud run (once)
+
+If the local flow looks good, add the credentials used to download the model and upload
+results. Dependency setup is already handled by [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync                          # create the .venv and install deps
@@ -36,13 +78,16 @@ AWS_ENDPOINT_URL=https://storage.eu-north1.nebius.cloud
 OUTPUT_URI=s3://serverless-challenge/cosmos3-ablation-results/
 ```
 
-Cloud jobs are launched with [SkyPilot](https://docs.skypilot.co/) (`sky`) against a
-Kubernetes-backed Nebius cluster. Confirm every `# VERIFY` comment in the two job YAMLs
-(image tags, repo URL, endpoint URLs) before trusting the numbers.
+Cloud jobs use [SkyPilot](https://docs.skypilot.co/) (`sky`) with a Kubernetes-backed
+Nebius cluster. Before the first run, fill in the project-specific values marked `# VERIFY`
+in the job YAMLs, such as the image tag, repository URL, and endpoint URLs.
 
 ---
 
-## 1. Run Job 2 — complete E0–E4 latency ladder
+## Run the latency benchmark
+
+Once the credentials are in place, one command launches the complete E0–E4 experiment on
+an H100:
 
 ```bash
 set -a && source .env && set +a
@@ -60,21 +105,23 @@ For a cheaper baseline-versus-final validation after the complete ladder has alr
 measured, override the same job with `--env CONFIGS=E0,E4`. That two-configuration run cannot
 reproduce the intermediate E1–E3 bars.
 
-## 2. Deploy the E0 + E4 policy endpoints (npa serverless)
+## Optional: deploy the E0 and E4 policy endpoints
 
-Job 3 scores two **already-running** endpoints — an **E0** baseline (eager) and the **E4**
-optimized candidate (FP8). Both serve `Cosmos3-Nano-Policy-DROID` through the *same* vLLM-Omni
-stack Job 2 uses, and each process exposes **both** eval routes: `POST /v1/videos` (the latency
-harness) and `ws /v1/realtime/robot/openpi` (RoboLab).
+This section is only needed for the RoboLab quality gate; skip it if you only need the
+latency benchmark and traces. Job 3 scores two **already-running** endpoints—an **E0**
+baseline (eager) and the **E4** optimized candidate (FP8). Both serve
+`Cosmos3-Nano-Policy-DROID` through the *same* vLLM-Omni stack Job 2 uses, and each process
+exposes **both** eval routes: `POST /v1/videos` (the latency harness) and
+`ws /v1/realtime/robot/openpi` (RoboLab).
 
-### 2.1 One-time: install + configure npa
+### Install and configure npa
 
 ```bash
 bash deploy/install_npa.sh            # install npa (editable) into the project venv
 npa configure --interactive           # writes ~/.npa/{credentials,config}.yaml — needs the AI Jobs IAM role
 ```
 
-### 2.2 Build + push the serve image
+### Build and push the serving image
 
 `npa cosmos deploy --runtime serverless` runs the image's **own ENTRYPOINT** (it injects env
 vars, never a container command), so the serving image must start the server itself.
@@ -96,7 +143,7 @@ cumulative `FLASH_ATTN` + `VLLM_COMPILE`/`FULL_AND_PIECEWISE` CUDA graphs + FP8 
 `--stage-overrides` `policy_server_config` that mounts the OpenPI websocket route. There is no
 separate "bake the flags into the image" step: the single `CONFIG` var drives everything.
 
-### 2.3 Deploy both endpoints (H100)
+### Deploy both endpoints on H100
 
 ```bash
 export HF_TOKEN=...                    # Cosmos3-Nano-Policy-DROID license accepted on HF
@@ -109,7 +156,7 @@ Defaults ([jobs/deploy-optimized.sh](jobs/deploy-optimized.sh)): `-p eu-north1`,
 `IMAGE=…/cosmos-droid-vllm:v4`. `--wait` blocks until RUNNING; each deploy stores the endpoint URL
 in its workbench alias. Override any default with the matching env var (`GPU_TYPE`, `IMAGE`, …).
 
-### 2.4 Probe both routes before trusting a URL
+### Check both routes
 
 ```bash
 curl -sf <url>/health && echo OK
@@ -122,9 +169,9 @@ curl -si -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Vers
 Stop billing when finished:
 `npa workbench cosmos -p eu-north1 -n cosmos-policy-<mode> teardown --yes`.
 
-## 3. Run Job 3 — RoboLab subset gate
+## Optional: run the RoboLab quality gate
 
-With both endpoints RUNNING (§2) and the 18 task slots in
+With both endpoints running and the 18 task slots in
 [config/robolab_tasks.yaml](config/robolab_tasks.yaml) populated (they already are — the harness
 rejects missing or unknown tasks), launch one job per endpoint (they run in parallel):
 
@@ -139,7 +186,7 @@ Records upload to `s3://serverless-challenge/robolab-eval-results/subset/raw/rob
 
 ---
 
-## 4. Download the results into `results/`
+## Bring the results back locally
 
 `results/` is the local download target (git-ignored except for `.gitkeep`).
 
@@ -155,7 +202,7 @@ aws s3 sync s3://serverless-challenge/robolab-eval-results/subset/raw/robolab/ r
   --endpoint-url "$AWS_ENDPOINT_URL"
 ```
 
-## 5. Create the Job 2 plots
+## Create the benchmark plots
 
 **Summary figures** (waterfall, stage breakdown, quality comparison) — the primary Job 2 plots:
 
@@ -178,7 +225,7 @@ attribution) from the vLLM profiler traces:
 
 ```bash
 # Job 2 uploads a directory, not traces.tar.gz. Download it before analysis if the
-# complete production/raw/ tree was not downloaded in section 3:
+# complete production/raw/ tree was not downloaded above:
 aws s3 cp \
   s3://serverless-challenge/cosmos3-ablation-results/production/raw/traces/ \
   results/traces/ --recursive --endpoint-url "$AWS_ENDPOINT_URL"
@@ -191,38 +238,4 @@ To gate Job 3 (baseline vs optimized success rates) after both endpoints have ru
 ```bash
 uv run python run_robolab.py --backend vllm --side both --robolab-root RoboLab \
   --endpoint-baseline https://<baseline> --endpoint-candidate https://<optimized>
-```
-
----
-
-## Repository layout
-
-| Path | Role |
-|---|---|
-| `jobs/job2-*.sky.yaml`, `jobs/job3-*.sky.yaml` | The two SkyPilot cloud jobs |
-| `jobs/aggregate-local.sh` | Download raw results + regenerate Job 2 figures locally |
-| `jobs/deploy-optimized.sh`, `deploy/install_npa.sh`, `workbench/` | Provision the E0/E4 endpoints Job 3 scores (Nebius `npa` workbench, H100 serverless) |
-| `deploy/Dockerfile.serve`, `deploy/serve_endpoint.sh`, `deploy/serve_launch.py` | Serve image: `cosmos-droid-vllm:v3` + a policy-server entrypoint (`CONFIG=E0\|E4` → `vllm-omni serve … --stage-overrides`) |
-| `deploy/versions.env` | vLLM / vLLM-Omni pins (`0.24.0`/`0.24.0`) baked into the serve image |
-| `run_matrix.py` | Ablation-matrix orchestrator (subprocess per config); driven by Job 2 |
-| `run_configuration.py` | Single configuration → per-config log artifacts (spawned by `run_matrix.py`) |
-| `run_robolab.py` | RoboLab quality gate; driven by Job 3 |
-| `aggregate.py` | Merge logs → CSV + waterfalls + stage breakdown + quality figures |
-| `analyze_traces.py` | Trace/profiler deep-dive figures (ECDF, Pareto, kernel/model-part) |
-| `config/experiment.yaml`, `config/robolab_tasks.yaml` | Experiment config + the 18 RoboLab task slots |
-| `policy/` | The pipeline: config matrix, replay dataset, latency measurement, aggregation, plots, vLLM serving contract, RoboLab runner |
-| `tests/` | Harness invariant tests (`uv run --group dev pytest`) |
-| `results/` | Local download target for Job 2 / Job 3 outputs |
-
-## Local smoke test (no GPU)
-
-The pipeline runs end-to-end on the modeled **mock backend**, which validates the plumbing,
-logs, aggregation, and figures before spending GPU time:
-
-```bash
-uv run python run_matrix.py --smoke --input-manifest policy/mock/manifest.json \
-  --output-dir results-smoke --backend mock \
-  --configurations E0,E1,E2,E3,E4
-uv run python aggregate.py --out-dir results-smoke
-uv run --group dev pytest -q
 ```
