@@ -175,11 +175,12 @@ class ServerHandle:
             pass
 
 
-# Serve entrypoint — VERIFIED against the installed vllm-omni 0.20.0 (2026-07-15): the package
-# registers ONLY a `vllm-omni` console script (entry_points.txt), and vanilla vllm 0.19.1 has no
-# `--omni` flag (its `serve --omni` usage string is stale docs), so `vllm serve --omni` dies at
-# argparse. engine_args() already carries --model and the per-config technique flags.
+# Serve entrypoint — verified against vllm-omni 0.24.0 (cli/main.py): the `vllm-omni` binary
+# WITHOUT `--omni` silently dispatches to VANILLA vllm — AR language tower only (chat routes
+# work, /v1/videos 404s, no diffusion/action stage; feasibility S5 caught this). `--omni` is
+# what selects omni's multi-stage server, so it is part of the command, not an option.
 SERVE_CMD = ("vllm-omni", "serve")
+OMNI_FLAG = "--omni"
 HEALTH_ROUTE = "/health"                         # verified (feasibility S3)
 INFER_ROUTE = "/v1/videos/sync"                  # verified route; policy mode via extra_params
 
@@ -191,7 +192,7 @@ def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
     VERIFY on-box: the serve entrypoint (SERVE_CMD), that every engine_args() flag is accepted,
     the static-shape / bucketing config the CUDA-graph rungs need (§9), and the readiness route.
     """
-    cmd = [*SERVE_CMD, model, *engine_args(config), "--host", host, "--port", str(port)]
+    cmd = [*SERVE_CMD, model, OMNI_FLAG, *engine_args(config), "--host", host, "--port", str(port)]
     proc = subprocess.Popen(cmd)                 # inherits stdout/stderr -> job logs
     base_url = f"http://{host}:{port}"
     health = base_url + HEALTH_ROUTE

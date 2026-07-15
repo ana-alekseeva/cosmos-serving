@@ -76,7 +76,9 @@ pass S2 "both CLIs run + triton JIT probe + ninja"
 
 # --- S3: serve the checkpoint (downloads ~30GB on first run) --------------------------
 echo "S3 launching: vllm-omni serve $MODEL (log: $WORK/serve.log)"
-"$WORK/.venv/bin/vllm-omni" serve "$MODEL" \
+# --omni is REQUIRED: without it the CLI dispatches to VANILLA vllm (AR language tower
+# only — chat works, /v1/videos 404s, no diffusion/action stage at all).
+"$WORK/.venv/bin/vllm-omni" serve "$MODEL" --omni \
     --port "$PORT" --max-num-seqs 1 \
     --profiler-config "{\"profiler\": \"torch\", \"torch_profiler_dir\": \"$TRACE_DIR\"}" \
     >"$WORK/serve.log" 2>&1 &
