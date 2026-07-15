@@ -7,7 +7,7 @@ This repository is a reproducible example of serving
 `Cosmos3-Nano-Policy-DROID` with vLLM / vLLM-Omni and measuring its
 observation-to-action latency while evaluating its task performance.
 
-A more detailed overview of the `Cosmos3-Nano-Policy-DROID` internals is available in
+A more detailed overview of the `Cosmos3-Nano-Policy-DROID` internals and the project setup is available in
 [this post](https://ana-alekseeva.com/posts/cosmos3-performance-engineering).
 
 <p align="center">
