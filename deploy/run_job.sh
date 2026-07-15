@@ -67,41 +67,31 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 # raw-cuBLAS probe (torch-side vs node-side) before giving up.
 # NB: `uv pip install` targets the active $VIRTUAL_ENV — pin --python or libs land in the wrong
 # venv (project-scoped `uv sync` is immune; setup.sh dodges it with `unset VIRTUAL_ENV`).
-PYMODEL="$FRAMEWORK/.venv/bin/python"
 if [ "$BACKEND" = vllm ]; then
-  # vLLM image (deploy/Dockerfile.vllm): vllm group, NO --all-extras (extras drag in extra ABI
-  # breakage). After the sync, re-apply everything it prunes/reinstalls (same rule as native):
-  #   * torch -> the PyPI cu128 build. vllm 0.19.1's PyPI wheels are CUDA-12 binaries
-  #     (vllm/_C.abi3.so NEEDs libcudart.so.12), but the framework maps torch to the cu13
-  #     pytorch index, so the sync leaves a cu13-only venv where `import vllm._C` dies on any
-  #     GPU node ("libcudart.so.12: cannot open shared object file"). PyPI torch==2.10.0 is the
-  #     cu128 flavor vllm was built against, and (unlike pytorch-index wheels) it declares its
-  #     nvidia-*-cu12 dep tree, which brings libcudart.so.12 + cuBLAS 12.8.4.1 (known-good on
-  #     H200+r580). --reinstall-package forces the flavor swap (PEP440: ==2.10.0 is already
-  #     "satisfied" by 2.10.0+cu130); --index-url keeps uv off the framework's index mapping.
-  #   * vllm-omni — separate PyPI package, not in the lock; pinned 0.20.0 (0.24 force-upgrades
-  #     transformers>=5.5 past what the lock resolved) — lockstep with deploy/Dockerfile.vllm.
-  #   * UNINSTALL torchaudio — transformers imports it opportunistically guarded only by
-  #     `except ImportError`: broken -> OSError crash on the vllm CLI path, absent -> clean skip.
-  # NB: do NOT add the cu13 nvidia-cublas/nvidia-cuda-runtime pins here — those versions are
-  # torch 2.13+cu130's pins and make uv upgrade torch to 2.13.0+cu130 to match (that silent
-  # jump is exactly what a failed Job 2 preflight showed alongside the libcudart error).
-  ( cd "$FRAMEWORK" && uv sync --group vllm )
-  uv pip install -q --python "$PYMODEL" --index-url https://pypi.org/simple \
-      --reinstall-package torch --reinstall-package torchvision \
-      "torch==2.10.0" "torchvision==0.25.0" "vllm-omni==0.20.0"
-  uv pip uninstall -q --python "$PYMODEL" torchaudio 2>/dev/null || true
-  # GPU-op trace dir — OUR knob, not vLLM's: the env var was removed from vllm 0.19.1;
+  # vLLM image (deploy/Dockerfile.vllm): STOCK PyPI venv at /opt/omni/.venv — vllm + vllm-omni
+  # pinned in lockstep from deploy/versions.env (Cosmos3 pipeline is upstream in omni >=0.22;
+  # verified 0.24/0.24 on H100). No cosmos-framework uv groups, no torch flavor juggling —
+  # vllm's own dep tree is self-consistent. Heal a stale image up to the pins idempotently.
+  PYMODEL="/opt/omni/.venv/bin/python"
+  # shellcheck disable=SC1091
+  . "$SERVING/deploy/versions.env"
+  uv pip install -q --python "$PYMODEL" "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" ninja
+  uv pip install -q --python "$PYMODEL" -e "$SERVING"
+  # cosmos_framework is vendored by PYTHONPATH (NOT installed): the cosmos3 pipeline lazily
+  # imports its action transforms / UniPC solver / pose utils for RoboLab policy serving.
+  export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$FRAMEWORK"
+  # GPU-op trace dir — OUR knob, not vLLM's (the env var was removed from vLLM):
   # policy/serving.py translates it into the --profiler-config engine flag at server launch
   # (per-config subdirs via policy/pipeline.py). Traces upload to ${OUTPUT_URI}raw/traces/.
   export VLLM_TORCH_PROFILER_DIR="${VLLM_TORCH_PROFILER_DIR:-/local/vllm_traces}"
   mkdir -p "$VLLM_TORCH_PROFILER_DIR"
 else
+  PYMODEL="$FRAMEWORK/.venv/bin/python"
   ( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server )
   uv pip install -qU --python "$PYMODEL" \
       "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
+  uv pip install -q --python "$PYMODEL" -e "$SERVING"
 fi
-uv pip install -q --python "$PYMODEL" -e "$SERVING"
 
 # Deterministic cuBLAS (the policy server runs with deterministic_seed=True) needs a workspace
 # config; without it some cuBLAS paths fail to initialize. Set globally, preflight probes WITH it
@@ -205,7 +195,7 @@ if [ "$rc" -eq 0 ]; then
     # Don't swallow the error: "CLI missing" vs "CLI crashes on import" need different fixes
     # (absent binary -> wrong image; ImportError/OSError -> broken venv, e.g. the torchaudio ABI
     # crash). Print the tail of the real traceback.
-    "$FRAMEWORK/.venv/bin/vllm" --help >/dev/null 2>/tmp/vllm_cli_err || {
+    "$(dirname "$PYMODEL")/vllm" --help >/dev/null 2>/tmp/vllm_cli_err || {
       echo "PREFLIGHT: vllm CLI failed — last lines:"
       tail -15 /tmp/vllm_cli_err | sed 's/^/PREFLIGHT vllm-cli /'
       irc=1
