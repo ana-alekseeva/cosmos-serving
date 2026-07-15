@@ -22,6 +22,9 @@ export HF_TOKEN HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
 MODEL="nvidia/Cosmos3-Nano-Policy-DROID"
 PORT="${PORT:-8091}"
 WORK="${WORK:-$HOME/omni-feas}"
+# Version pins come from ONE place (deploy/versions.env); env vars still override.
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$_here/versions.env" ] && . "$_here/versions.env"
 VLLM_PIN="${VLLM_PIN:-0.24.0}"        # keep vllm and vllm-omni major/minor IN LOCKSTEP
 OMNI_PIN="${OMNI_PIN:-0.24.0}"
 TRACE_DIR="$WORK/traces"
@@ -93,36 +96,60 @@ pass S3 "server healthy"
 curl -sf "http://127.0.0.1:$PORT/v1/models" | tee "$WORK/models.json" | grep -q "Cosmos3" \
   && pass S4 "/v1/models lists the model" || fail S4 "/v1/models"
 
-# --- S5: one action request (policy mode, DROID embodiment) ---------------------------
-# 64x64 red PNG as the camera frame — feasibility probes the ROUTE + action_mode plumbing,
-# not output quality. If the schema is rejected, serve.log + response.json show the
-# server's expected shape (the pipeline reads extra args: action_mode, embodiment, ...).
+# --- S5: one POLICY action request via the REAL route ---------------------------------
+# POST /v1/videos/sync as multipart form (verified against the 0.24.0 source): the camera
+# frame goes as the input_reference file, the Generator recipe as form fields
+# (num_inference_steps/guidance_scale/flow_shift/seed — per-REQUEST, not serve flags), and
+# the action plumbing via extra_params JSON merged into the pipeline's extra_args
+# (action.py: action_mode + domain_name/domain_id required; DROID = droid_lerobot -> 8).
+# NB /v1/chat/completions only reaches the language tower — it chats back, no actions.
+# PASS = top-level "action" field shaped [32, 8]. robot_obs (proprio) intentionally absent
+# here: a validation error naming its expected structure is also useful signal — Job 2's
+# replay client sends the full observation.
 "$PY" - <<EOF | tee "$WORK/response.json"
-import base64, io, json, urllib.request
-try:
-    from PIL import Image
-    buf = io.BytesIO(); Image.new("RGB", (64, 64), (200, 30, 30)).save(buf, "PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-except ImportError:
-    b64 = ""  # PIL ships with vllm; fallback keeps the probe alive
-body = {
+import io, json, mimetypes, urllib.request, uuid
+from PIL import Image
+
+buf = io.BytesIO(); Image.new("RGB", (320, 256), (200, 30, 30)).save(buf, "PNG")
+boundary = uuid.uuid4().hex
+fields = {
     "model": "$MODEL",
-    "messages": [{"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-        {"type": "text", "text": "Pick up the banana and place it in the bowl."},
-    ]}],
-    "action_mode": "policy",
-    "embodiment": "droid_lerobot",
+    "prompt": "Pick up the banana and place it in the bowl.",
+    "num_inference_steps": "4",
+    "guidance_scale": "3",
+    "flow_shift": "5",
+    "seed": "0",
+    "extra_params": json.dumps({
+        "action_mode": "policy",
+        "domain_name": "droid_lerobot",
+        "action_chunk_size": 32,
+    }),
 }
-req = urllib.request.Request("http://127.0.0.1:$PORT/v1/chat/completions",
-                             json.dumps(body).encode(), {"Content-Type": "application/json"})
+body = b""
+for k, v in fields.items():
+    body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").encode()
+body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"input_reference\"; "
+         f"filename=\"frame.png\"\r\nContent-Type: image/png\r\n\r\n").encode()
+body += buf.getvalue() + f"\r\n--{boundary}--\r\n".encode()
+req = urllib.request.Request(
+    "http://127.0.0.1:$PORT/v1/videos/sync", body, method="POST",
+    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
 try:
-    print(urllib.request.urlopen(req, timeout=300).read().decode()[:3000])
+    resp = json.loads(urllib.request.urlopen(req, timeout=600).read().decode())
+    action = resp.get("action") or resp.get("actions")
+    if action is not None:
+        import numpy as np
+        shape = np.asarray(action).shape
+        print(f"S5 action shape: {shape}")
+        assert tuple(shape)[-2:] == (32, 8), f"expected [...,32,8], got {shape}"
+        print("S5 PASS: action chunk [32, 8] returned")
+    else:
+        print("S5 no action field; top-level keys:", sorted(resp))
+        print(json.dumps(resp)[:2000])
 except Exception as e:
-    body_txt = getattr(e, "read", lambda: b"")()
-    print("S5 request failed:", e, body_txt[:2000])
+    print("S5 request failed:", e, getattr(e, "read", lambda: b"")()[:2000])
 EOF
-echo "S5: inspect response above — an action tensor (or a schema error naming the expected fields) both count as feasibility signal"
+echo "S5: an action [32,8] = full pass; a validation error naming robot_obs/observation fields = the contract for the Job 2 replay client"
 
 # --- S6: profiler roundtrip ------------------------------------------------------------
 curl -sf -X POST "http://127.0.0.1:$PORT/start_profile" && curl -sf -X POST "http://127.0.0.1:$PORT/stop_profile" \
