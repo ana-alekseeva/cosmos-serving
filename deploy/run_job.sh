@@ -238,9 +238,9 @@ python -m policy.capture --n "$REPLAY_N" --out /local/replay
 # model weights for the native-PyTorch path (vLLM pulls by id, so only when BACKEND=pytorch)
 [ "$BACKEND" = pytorch ] && hf download "$MODEL" --local-dir /local/model
 
-# --- run the matrix in the MODEL venv (torch + cosmos_framework + policy) ---
+# --- run the matrix in the MODEL venv (vllm: /opt/omni/.venv; native: framework venv) ---
 # shellcheck disable=SC1091
-source "$FRAMEWORK/.venv/bin/activate"
+source "$(dirname "$PYMODEL")/activate"
 
 # MODE=profile: Perfetto/Chrome traces only — profile_and_upload.sh runs policy.profile_pytorch
 # per config (1 traced request after warmups) and uploads to ${OUTPUT_URI}raw/traces/.
