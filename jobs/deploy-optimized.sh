@@ -42,6 +42,10 @@ ENV_ARGS=(--env "CONFIG=$CONFIG")
 [ -n "$PROJECT_ID" ] && ENV_ARGS+=(--project-id "$PROJECT_ID")
 [ -n "$SUBNET_ID" ]  && ENV_ARGS+=(--subnet-id "$SUBNET_ID")
 [ -n "$IMAGE" ]      && ENV_ARGS+=(--image "$IMAGE")
+# REPLACE=1 to delete + recreate an existing serverless alias (npa refuses to overwrite one
+# otherwise). Needed to redeploy the SAME alias — e.g. after a failed deploy left it registered,
+# or to roll the image tag. Note: this tears down the running endpoint before recreating it.
+[ -n "${REPLACE:-}" ] && ENV_ARGS+=(--replace)
 
 echo "==> npa workbench cosmos deploy ($MODE) -> serverless AI endpoint"
 # Group opts (-p/-n) go before the subcommand. --auto-serve (default) loads the model after a
