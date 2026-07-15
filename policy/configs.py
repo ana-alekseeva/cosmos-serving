@@ -162,10 +162,18 @@ def _native_ladder() -> list[Config]:
     return out
 
 
-# ---- End-to-end cumulative waterfall: E0 -> E7 ------------------------------------
-# The union the spec lists, applied across BOTH towers cumulatively (§3):
-#   Baseline eager -> Flash -> compile -> CUDA graphs -> reasoner cond cache
-#     -> Cache-DiT -> FP8 -> Final.
+# ---- End-to-end cumulative waterfall: E0 -> E4 ------------------------------------
+# Applied across BOTH towers cumulatively (§3): Baseline eager -> Flash -> compile ->
+# CUDA graphs -> FP8 -> Final. Two rungs were REMOVED after the H100 Job 2 measurements
+# (2026-07-15):
+#   * Cache-DiT: its warmup window (W=4) equals the whole 4-step schedule so the cache
+#     never activates, AND its BlockAdapter bypasses the compiled transformer at runtime
+#     (80.6% of kernel time executed eager under adapter frames vs 82% fused on the
+#     CUDA-graphs rung) — +170ms for nothing. The engine still supports the flag
+#     (stage_flags cache_dit -> --cache-backend cache_dit) for one-off comparisons.
+#   * Reasoner conditioning cache: not implementable on stock vllm-omni (no cross-request
+#     cache; measured identical to the CUDA-graphs rung). It remains a NATIVE-ladder rung
+#     (P3) and a proposed vllm-omni patch.
 def _end_to_end_ladder() -> list[Config]:
     mr: dict = {}   # reasoner_conditioning multipliers
     mg: dict = {}   # generator (prepare + denoise) multipliers
@@ -174,10 +182,7 @@ def _end_to_end_ladder() -> list[Config]:
         ("E1", "+ Flash Attention (FLASH_ATTN)", "flash-attention", {"attention": "flash"}, False),
         ("E2", "+ torch.compile", "torch.compile", {"compile": True}, False),
         ("E3", "+ CUDA graphs", "cuda-graphs", {"cuda_graphs": True}, False),
-        ("E4", "+ Reasoner conditioning cache", "reasoner-conditioning-cache",
-         {"reasoner_cache": True}, False),
-        ("E5", "+ Cache-DiT", "cache-dit", {"cache_dit": True}, True),
-        ("E6", "+ FP8", "fp8", {"quantization": "fp8"}, True),
+        ("E4", "+ FP8", "fp8", {"quantization": "fp8"}, True),
     ]
     out, cached, flags_acc = [], False, {}
     for i, (cid, label, added, flags, lossy) in enumerate(rows):
@@ -199,11 +204,10 @@ def _end_to_end_ladder() -> list[Config]:
             _mul(mg, "action_denoising", _CACHEDIT_DENOISE)
         elif added == "fp8":
             _mul(mg, "action_denoising", _FP8_DENOISE)
-        label2 = "Final optimized latency" if cid == "E6" else label
+        label2 = "Final optimized latency" if cid == rows[-1][0] else label
         out.append(Config(cid, END_TO_END, label2, i, added, lossy,
                           stage_flags=dict(flags_acc), stage_multipliers={**mr, **mg},
                           reasoner_cached=cached))
-    # rename the last rung's cid-facing label already handled; final rung is E6.
     return out
 
 

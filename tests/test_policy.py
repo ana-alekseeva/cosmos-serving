@@ -5,6 +5,8 @@ the §8 drift check, the §10 acceptance checks, the quality gate), not the mock
 constants (those are replaced by real vLLM/vLLM-Omni measurements on the GPU) nor the
 matplotlib rendering.
 """
+import json
+from dataclasses import replace as dc_replace
 from pathlib import Path
 
 import pytest
@@ -32,28 +34,30 @@ from policy.matrix import run_matrix
 from policy.measure import LatencyRecord
 from policy.mock.replay import build_mock_replay, write_mock_manifest
 from policy.pipeline import make_engine
-from policy import robolab
+from policy import robolab, robolab_runner
 
 
 # -- Config matrix (§3) -----------------------------------------------------------
 def test_ladders_match_spec():
     assert [c.cid for c in NATIVE_LADDER] == ["P0", "P1", "P2", "P3"]
-    assert [c.cid for c in END_TO_END_LADDER] == ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
+    assert [c.cid for c in END_TO_END_LADDER] == ["E0", "E1", "E2", "E3", "E4"]
     # baselines add no technique (P starts from the cuDNN fused-attention baseline)
     for lad in (NATIVE_LADDER, END_TO_END_LADDER):
         assert lad[0].added == "" and not lad[0].lossy
 
 
-def test_only_cachedit_and_fp8_are_lossy():
+def test_only_fp8_is_lossy():
     lossy = {c.cid for c in all_configs() if c.lossy}
-    # Cache-DiT (E5) + FP8 (E6) — vLLM-Omni only; the native P ladder has no lossy rungs.
-    assert lossy == {"E5", "E6"}
+    # FP8 (E4) is the only lossy rung left: Cache-DiT was removed from the ladder
+    # (never activates on the 4-step schedule + bypasses the compiled transformer) and
+    # the reasoner conditioning cache moved to patch-proposal status (not implementable
+    # stock) — see the rationale in policy/configs.py. The native P ladder has no lossy rungs.
+    assert lossy == {"E4"}
 
 
 def test_end_to_end_ladder_is_the_union_spec_lists():
     added = [c.added for c in END_TO_END_LADDER[1:]]
-    assert added == ["flash-attention", "torch.compile", "cuda-graphs",
-                     "reasoner-conditioning-cache", "cache-dit", "fp8"]
+    assert added == ["flash-attention", "torch.compile", "cuda-graphs", "fp8"]
 
 
 # -- Replay dataset + quality subset (§5) -----------------------------------------
@@ -68,7 +72,7 @@ def test_replay_set_is_fixed_and_deterministic():
 def test_quality_subset_is_3x3x2():
     sub = quality_subset()
     assert len(sub) == 18                                      # 3 groups x 3 difficulty x 2 tasks
-    assert {t.capability for t in sub} == {"pick_place", "articulated", "tool_use"}
+    assert {t.capability for t in sub} == {"visual", "relational", "procedural"}
     assert {t.difficulty for t in sub} == {"easy", "medium", "hard"}
     assert all(t.episodes == 10 for t in sub)
 
@@ -76,8 +80,8 @@ def test_quality_subset_is_3x3x2():
 # -- §7 log schema ----------------------------------------------------------------
 def test_jsonl_row_has_every_required_field():
     req = build_mock_replay(1)[0]
-    rec = make_engine("mock", config_by_id("E5")).run_request(req)
-    row = rec.to_jsonl_row(run_id="t", configuration="E5", engine="mock")
+    rec = make_engine("mock", config_by_id("E4")).run_request(req)
+    row = rec.to_jsonl_row(run_id="t", configuration="E4", engine="mock")
     assert set(row) >= {"run_id", "configuration", "engine", "task", "episode_id",
                         "request_id", "latency_ms", "denoising_step_ms", "peak_memory_mb",
                         "output_checksum", "quality_gate"}
@@ -132,13 +136,13 @@ def test_native_ladder_reasoner_is_monotonic_and_cache_dominates():
 
 def test_lossless_configs_are_bit_identical_to_baseline():
     # Lossless techniques must produce the same action checksum as eager (numerical
-    # equivalence); lossy ones (Cache-DiT/FP8) deviate.
+    # equivalence); the lossy one (FP8) deviates.
     req = build_mock_replay(1)[0]
     base = make_engine("mock", config_by_id("E0")).run_request(req).output_checksum
-    e4 = make_engine("mock", config_by_id("E4")).run_request(req).output_checksum   # lossless
-    e6 = make_engine("mock", config_by_id("E6")).run_request(req).output_checksum   # +fp8/cache-dit
-    assert e4 == base
-    assert e6 != base
+    e3 = make_engine("mock", config_by_id("E3")).run_request(req).output_checksum   # lossless top
+    e4 = make_engine("mock", config_by_id("E4")).run_request(req).output_checksum   # +fp8 (lossy)
+    assert e3 == base
+    assert e4 != base
 
 
 def test_mock_is_reproducible_across_engine_instances():
@@ -200,22 +204,101 @@ def test_final_acceptance_checks(aggregated):
 
 # -- RoboLab quality gate (§5, §9) ------------------------------------------------
 def test_robolab_subset_gate_passes_for_final():
-    result = robolab.compare("E0", "E6", backend="mock")
+    result = robolab.compare("E0", END_TO_END_LADDER[-1].cid, backend="mock")
     assert result["success_drop"] <= result["threshold"]
     assert result["passed"]
     assert 0.0 <= result["candidate_success"] <= 1.0
 
 
+# -- Real RoboLab driver (§4 Job 3): everything testable without an Isaac box ------
+def test_openpi_uri_forms():
+    f = robolab_runner.openpi_uri
+    route = robolab_runner.OPENPI_ROUTE
+    assert f("https://ep.nebius.cloud") == f"wss://ep.nebius.cloud{route}"
+    assert f("http://127.0.0.1:8000") == f"ws://127.0.0.1:8000{route}"
+    assert f("https://host/base/") == f"wss://host/base{route}"
+    assert f(f"wss://host{route}") == f"wss://host{route}"      # already the full URI
+
+
+def test_committed_task_map_covers_every_slot():
+    # The committed map fills all 18 slots with real RoboLab benchmark class names
+    # (selection rationale in config/robolab_tasks.yaml; names validated against the
+    # catalog's task_metadata.json at selection time).
+    m = robolab_runner.load_task_map()
+    assert len(m) == 18
+    assert set(m) == {t.task for t in quality_subset()}
+    assert all(v.endswith("Task") for v in m.values())
+
+
+def test_task_map_fails_loudly_on_unfilled_slots(tmp_path):
+    # An unfilled slot must refuse to run and be named — no invented task names.
+    p = tmp_path / "map.yaml"
+    p.write_text("RoboLab-visual-easy-0: null\n")
+    with pytest.raises(ValueError, match="RoboLab-visual-easy-0"):
+        robolab_runner.load_task_map(p)
+
+
+def test_parse_task_success_accepts_plausible_shapes(tmp_path):
+    cases = [
+        ({"success_rate": 0.7, "num_runs": 10}, (0.7, 10)),
+        ({"successes": 6, "episodes": 10}, (0.6, 10)),
+        ({"results": [{"success": True}, {"success": False}]}, (0.5, 2)),
+        ([True, True, False, False], (0.5, 4)),
+    ]
+    for i, (payload, want) in enumerate(cases):
+        d = tmp_path / f"case{i}"
+        d.mkdir()
+        (d / "eval_summary.json").write_text(json.dumps(payload))
+        assert robolab_runner.parse_task_success(d) == want
+    # Name hints outrank alphabetical order: a metrics-free config.json must not win.
+    d = tmp_path / "hinted"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({"task": "X", "seed": 0}))
+    (d / "success_metrics.json").write_text(json.dumps({"success_rate": 0.9}))
+    assert robolab_runner.parse_task_success(d)[0] == 0.9
+    # No parsable metrics -> loud failure listing what was seen, never a guessed number.
+    d = tmp_path / "junk"
+    d.mkdir()
+    (d / "config.json").write_text(json.dumps({"task": "X"}))
+    with pytest.raises(RuntimeError, match="config.json"):
+        robolab_runner.parse_task_success(d)
+
+
+def test_real_subset_resumes_from_records_and_matches_gate_shape(tmp_path):
+    # Pre-written per-task records short-circuit the simulator entirely (§10 resume), so
+    # this exercises the full real-path aggregation on a laptop. Shape must match the
+    # mock's so compare() gates either backend.
+    subset = quality_subset()
+    cfg = END_TO_END_LADDER[-1]                       # the final optimized rung
+    rollout = tmp_path / "robolab"
+    for t in subset:
+        p = rollout / cfg.cid / f"{t.task}.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"task": t.task, "robolab_task": "MappedTask",
+                                 "capability": t.capability, "difficulty": t.difficulty,
+                                 "episodes": t.episodes, "success_rate": 0.8,
+                                 "source": "test"}))
+    result = robolab_runner.run_quality_subset_real(
+        cfg, "https://ep.example", subset, robolab_root=tmp_path / "no-checkout-needed",
+        rollout_dir=rollout, task_map={t.task: "MappedTask" for t in subset})
+    assert result["overall_success"] == 0.8
+    assert len(result["per_task"]) == len(subset)
+    mock = robolab.run_quality_subset(cfg, backend="mock")
+    assert set(mock["per_task"][0]) == set(result["per_task"][0])
+    for key in ("configuration", "overall_success", "per_task"):
+        assert key in result and key in mock
+
+
 # -- Native PyTorch backend / technique compatibility (§5.3.1 vs §5.3.3) -----------
 def test_pytorch_backend_rejects_vllm_only_techniques():
-    # Cache-DiT (E5) and FP8 (E6) are vLLM-Omni-only (§5.3.3) — not native PyTorch.
-    for cid in ("E5", "E6"):
+    # FP8 (E4) is vLLM-Omni-only (§5.3.3) — not native PyTorch.
+    for cid in ("E4",):
         c = config_by_id(cid)
         assert not compat.supported(c, "pytorch")
         with pytest.raises(UnsupportedTechnique):
             make_engine("pytorch", c)          # __init__ validates -> refuses
     # The §5.3.1 rungs ARE native-PyTorch (the whole P ladder, and E0-E4).
-    for cid in ("P0", "P1", "P2", "P3", "E0", "E1", "E2", "E3", "E4"):
+    for cid in ("P0", "P1", "P2", "P3", "E0", "E1", "E2", "E3"):
         assert compat.supported(config_by_id(cid), "pytorch")
 
 
@@ -224,16 +307,19 @@ def test_vllm_backend_supports_every_config():
 
 
 def test_cachedit_cudagraph_conflict_is_flagged():
-    # E5/E6 stack CUDA graphs (from E3) + Cache-DiT (E5) — a non-composing pair (§9).
-    assert compat.conflicts(config_by_id("E5"))
-    assert compat.conflicts(config_by_id("E6"))
-    assert not compat.conflicts(config_by_id("E4"))   # no Cache-DiT yet -> no conflict
+    # Cache-DiT + CUDA graphs is a non-composing pair (§9). No ladder rung carries
+    # Cache-DiT anymore (removed after the Job 2 measurements), so the detector is
+    # exercised on a hand-built off-ladder config; the ladder itself must be clean.
+    e3 = config_by_id("E3")                            # cuda_graphs on
+    off_ladder = dc_replace(e3, stage_flags={**e3.stage_flags, "cache_dit": True})
+    assert compat.conflicts(off_ladder)
+    assert all(not compat.conflicts(c) for c in all_configs())
 
 
 def test_end_to_end_and_lossy_route_to_vllm():
     # A native-PyTorch waterfall run routes the production-stack configs to vLLM/vLLM-Omni:
     #   the whole end-to-end (E) ladder + the Cache-DiT/FP8 rungs (§5.3.2/§5.3.3).
-    for cid in ("E0", "E1", "E2", "E3", "E4", "E5", "E6"):
+    for cid in ("E0", "E1", "E2", "E3", "E4"):
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
     for cid in ("P0", "P1", "P2", "P3"):              # native §5.3.1 reference rungs
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "pytorch"
@@ -250,5 +336,5 @@ def test_matrix_routes_configs_per_backend(tmp_path):
                      baseline_at_start_and_end=False, randomize_order=False)
     status = run_matrix(exp, spawn=False)             # everything fails off-box; routing still recorded
     cb = status["config_backends"]
-    assert cb["E6"] == "vllm" and cb["P0"] == "pytorch"
+    assert cb["E4"] == "vllm" and cb["P0"] == "pytorch"
     assert not status["skipped"]                      # nothing skipped — all routed to a real backend

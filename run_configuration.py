@@ -23,7 +23,7 @@ app = typer.Typer(add_completion=False)
 
 @app.command()
 def main(
-    configuration: str = typer.Option(..., "--configuration", help="config id, e.g. P0 / E5 / E6"),
+    configuration: str = typer.Option(..., "--configuration", help="config id, e.g. P0 / E4"),
     backend: str = typer.Option("mock", "--backend", help="mock | pytorch | vllm"),
     out_dir: Path = typer.Option(Path("results"), "--out-dir"),
     out_subdir: str = typer.Option(None, "--out-subdir", help="override output subdir (default: cid)"),

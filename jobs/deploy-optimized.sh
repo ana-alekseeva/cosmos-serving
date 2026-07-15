@@ -26,7 +26,7 @@ SUBNET_ID="${SUBNET_ID:-}"                         # required if the project has
 # VERIFY the exact names the cosmos serve backend reads for FP8 / Cache-DiT / conditioning cache.
 ENV_ARGS=()
 if [ "$MODE" = "optimized" ]; then
-  ENV_ARGS=(--env POLICY_CONDITIONING_CACHE=1 --env CACHE_DIT=1 --env QUANTIZATION=fp8)
+  ENV_ARGS=(--env QUANTIZATION=fp8)   # final E4: flash+compile+graphs baked in; fp8 on top (Cache-DiT/cond-cache dropped from ladder)
 fi
 [ -n "$PROJECT_ID" ] && ENV_ARGS+=(--project-id "$PROJECT_ID")
 [ -n "$SUBNET_ID" ]  && ENV_ARGS+=(--subnet-id "$SUBNET_ID")

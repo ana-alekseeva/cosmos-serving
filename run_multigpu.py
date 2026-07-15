@@ -2,7 +2,7 @@
 """Separate multi-GPU experiment (specification_revised.txt §3).
 
 Runs CFG-Parallel (if the action pipeline uses CFG) and Ulysses Context-Parallel on 2 GPUs
-and compares each against the best single-GPU configuration (final E6). Kept OFF the primary
+and compares each against the best single-GPU configuration (final E4). Kept OFF the primary
 waterfall — "Do not mix different GPU counts in the primary waterfall" (§3).
 
     python run_multigpu.py --backend mock --out-dir results

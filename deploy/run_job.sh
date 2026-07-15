@@ -8,13 +8,13 @@
 #   HF_TOKEN            (secret, required)   HF login for the gated Cosmos3-Nano-Policy-DROID
 #   BACKEND=pytorch     pytorch (native P ladder, deploy/Dockerfile image) | vllm (production
 #                       E configs via vLLM/vLLM-Omni, deploy/Dockerfile.vllm image — Job 2:
-#                       BACKEND=vllm CONFIGS=E0,E6 OUTPUT_PREFIX=production/)
+#                       BACKEND=vllm CONFIGS=E0,E4 OUTPUT_PREFIX=production/)
 #   OUTPUT_PREFIX=      appended to OUTPUT_URI (job-specific S3 subdir; .env wins over --env
 #                       for OUTPUT_URI itself)
 #   MODE=matrix         matrix (run_matrix.py) | multigpu (run_multigpu.py, needs >=2 GPUs) |
 #                       profile (torch.profiler Chrome traces ONLY -> ${OUTPUT_URI}raw/traces/,
 #                       open at https://ui.perfetto.dev; no matrix)
-#   CONFIGS=            comma-sep cids, empty = full matrix   (e.g. "E0,E6")
+#   CONFIGS=            comma-sep cids, empty = full matrix   (e.g. "E0,E4")
 #   PROFILE_CONFIGS=    space-sep cids to trace (profile mode default "P0 P1 P2 P3"); set it on a
 #                       matrix run to ALSO upload traces after the results
 #   REPLAY_N=50  REPLAY_SIZE=50  WARMUPS=5
@@ -42,7 +42,7 @@ if [ "$MODE" = matrix ] && [ -z "$CONFIGS" ]; then
   # vllm default = Job 2's scope (§4): production baseline + final optimized ONLY, never the
   # full matrix (P configs would route to the absent native stack on this image, and the spec
   # explicitly says not to repeat the ablation ladder in production engines).
-  [ "$BACKEND" = pytorch ] && CONFIGS="P0,P1,P2,P3" || CONFIGS="E0,E6"
+  [ "$BACKEND" = pytorch ] && CONFIGS="P0,P1,P2,P3" || CONFIGS="E0,E4"
 fi
 : "${REPLAY_N:=50}"; : "${REPLAY_SIZE:=50}"; : "${WARMUPS:=5}"; : "${OUTPUT_DIR:=results}"
 mkdir -p /local/replay /local/model

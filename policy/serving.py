@@ -229,16 +229,21 @@ def _png(arr) -> bytes:
     return buf.getvalue()
 
 
-def _concat_view(wrist, exterior):
+def _concat_view(wrist, exterior, exterior_2=None):
     """Client-side replica of the server's compose_robolab_views concat_view: wrist on top,
-    two exterior views halved side-by-side below. Our capture has ONE exterior camera, so it
-    stands in for both (documented capture-set limitation; real DROID has two)."""
+    the two DROID exterior views halved side-by-side below. Older 2-view captures (no
+    exterior_2 in the .npz) reuse the single exterior for both halves."""
     import numpy as np
     from PIL import Image
 
     h, w = wrist.shape[0] // 2, wrist.shape[1] // 2
-    half = np.asarray(Image.fromarray(exterior).resize((w, h)), dtype=np.uint8)
-    return np.concatenate([wrist, np.concatenate([half, half], axis=1)], axis=0)
+
+    def _half(view):
+        return np.asarray(Image.fromarray(view).resize((w, h)), dtype=np.uint8)
+
+    half = _half(exterior)
+    half2 = _half(exterior_2) if exterior_2 is not None else half
+    return np.concatenate([wrist, np.concatenate([half, half2], axis=1)], axis=0)
 
 
 def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
@@ -250,7 +255,8 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
     the last row conditions the action expert). Camera keys are deliberately ABSENT from
     robot_obs (base64 wouldn't parse — the server wants uint8 arrays): extract_robolab_image
     then falls back to the request's multi_modal_data.image = our input_reference file, which
-    we send as the composed concat_view PNG (wrist top, exteriors below) — binary, not JSON."""
+    we send as the composed concat_view PNG (wrist top, both DROID exteriors below) — binary,
+    not JSON."""
     from policy.capture import load_capture
 
     obs = load_capture(req.capture_ref)             # real DROID observation (exterior/wrist/proprio)
@@ -278,7 +284,7 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
             },
         }),
     }
-    return fields, _png(_concat_view(obs["wrist"], obs["exterior"]))
+    return fields, _png(_concat_view(obs["wrist"], obs["exterior"], obs.get("exterior_2")))
 
 
 def _multipart(fields: dict[str, str], file_field: str, filename: str,

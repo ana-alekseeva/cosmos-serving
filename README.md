@@ -18,12 +18,16 @@ lossy techniques on RoboLab task success.
 | Waterfall | Rungs | Measures |
 |---|---|---|
 | **Native PyTorch (P)** | P0 cuDNN-fused → +`torch.compile` → +CUDA graphs → **+conditioning cache** | `total_chunk_ms` (+ per-stage breakdown) |
-| **End-to-end (E, vLLM)** | E0 eager (math) → +Flash → +compile → +CUDA graphs → +reasoner cache → +Cache-DiT → +FP8 → **final** | `total_chunk_ms` |
+| **End-to-end (E, vLLM)** | E0 eager (SDPA) → +Flash (FA3) → +compile → +CUDA graphs → +FP8 → **final** | `total_chunk_ms` |
 
 The old reasoner (R) and generator (G) ladders are merged into one native ladder **P** — they ran the
-same single MoT inference and gave identical on-box numbers. Cache-DiT/FP8 are vLLM-only (§5.3.3), on E.
+same single MoT inference and gave identical on-box numbers. FP8 is vLLM-only (§5.3.3), on E.
+Cache-DiT and the cross-request reasoner cache were REMOVED from the E ladder after the H100
+measurements: Cache-DiT never activates at 4 denoising steps AND its adapter bypasses the
+compiled transformer (+170 ms net); the reasoner cache has no stock vllm-omni implementation
+(rationale + trace evidence in policy/configs.py).
 
-Cache-DiT and FP8 are **lossy → quality-gated**: included in the final configuration only if
+FP8 is **lossy → quality-gated**: included in the final configuration only if
 RoboLab success holds (§3, §9). The multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel)
 run as a **separate** experiment (§3) — never mixed into the single-GPU waterfall.
 
@@ -39,7 +43,7 @@ Managed with [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync
 
-# Job 1 — the full single-GPU ablation matrix (P0-P3, E0-E6) with §8 bias controls
+# Job 1 — the full single-GPU ablation matrix (P0-P3, E0-E4) with §8 bias controls
 # (baseline at start+end, randomized order, drift rejection), each config an isolated subprocess:
 uv run python run_matrix.py --config config/experiment.yaml \
     --input-manifest policy/mock/manifest.json --output-dir results --backend mock
@@ -52,17 +56,17 @@ uv run python aggregate.py --out-dir results
 # One configuration on its own (the §7 per-config artifacts):
 uv run python run_configuration.py --configuration P0 --backend mock --out-dir results
 
-# RoboLab subset quality gate (baseline vs final) — the lossy Cache-DiT/FP8 gate:
-uv run python run_robolab.py --baseline E0 --candidate E6
+# RoboLab subset quality gate (baseline vs final) — the lossy FP8 gate:
+uv run python run_robolab.py --baseline E0 --candidate E4
 
 # Separate multi-GPU experiment (CFG-Parallel + Ulysses vs best single-GPU):
 uv run python run_multigpu.py --backend mock
 ```
 
-Example end-to-end result (mock, 4-step DROID recipe): **E0 ≈ 229 ms → E6 ≈ 57 ms (4.0×)**,
-dominated by the reasoner-conditioning cache (the naive baseline recomputes conditioning every
-one of the 4 denoising steps: reasoner P0 183 ms → P3 28 ms); Cache-DiT + FP8 pass the RoboLab
-subset gate. See `results/aggregate/`.
+Example end-to-end result (mock, 4-step DROID recipe): **E0 ≈ 230 ms → E4 ≈ 145 ms (1.6×)**,
+dominated by torch.compile fusing the norm/RoPE elementwise mass (real H100 numbers:
+E0 1537 ms → E3 1276 ms p50, −17%; FP8 flat on latency but 30.7→17.3 GB VRAM); FP8 passes the
+RoboLab subset gate. See `results-production/analysis/`.
 
 ## Layout
 
@@ -73,7 +77,7 @@ subset gate. See `results/aggregate/`.
 | `aggregate.py` | Job 5 — merge logs → CSV/Parquet + waterfalls + stage breakdown + CIs + figures |
 | `run_robolab.py` / `run_multigpu.py` | Jobs 3-4 quality gate / the separate multi-GPU experiment |
 | `config/experiment.yaml` | the experiment config (§4 `--config experiment.yaml`) |
-| `policy/configs.py` | the P0-P3 / E0-E6 configuration matrix + stage-effect model |
+| `policy/configs.py` | the P0-P3 / E0-E4 configuration matrix + stage-effect model |
 | `policy/dataset.py` | fixed ~256-request replay set + the 18-task RoboLab quality subset (§5) |
 | `policy/pipeline.py` | mock per-stage latency engine + vLLM/vLLM-Omni real-backend stub |
 | `policy/measure.py` / `logs.py` | the §6 latency field set, p50/p90/p99, §7 log format |
@@ -156,7 +160,7 @@ nebius ai job create --name cosmos-job1-native --parent-id "$PROJECT_ID" \
   --env HF_TOKEN="$HF_TOKEN"
 ```
 `--timeout` is a *cap* (default 24h) — you're billed for actual runtime (~1–2 h for Job 1). The other jobs are
-the same shape with different `--preset`/`--env` (and the vLLM image): **2** `BACKEND=vllm CONFIGS=E0,E6`;
+the same shape with different `--preset`/`--env` (and the vLLM image): **2** `BACKEND=vllm CONFIGS=E0,E4`;
 **1b** `MODE=multigpu`; **2b** adds `TENSOR_PARALLEL_SIZE=2 PARALLEL=cfg`. ⚠ H200 has NO 2-GPU preset —
 only `1gpu-16vcpu-200gb` and `8gpu-128vcpu-1600gb` (verified via `nebius compute platform list`), so the
 multi-GPU jobs rent the 8-GPU preset and leave the surplus GPUs idle (or set `TENSOR_PARALLEL_SIZE=8`).
@@ -171,13 +175,13 @@ project's venv. Commands below are the real, current CLI (npa 0.1.0), verified o
 bash deploy/install_npa.sh
 npa configure --interactive
 
-# Create a serverless AI endpoint for the optimized (E6) DROID policy — the workbench resource:
+# Create a serverless AI endpoint for the optimized (E4) DROID policy — the workbench resource:
 MODE=optimized PROJECT_ALIAS=cosmos HF_TOKEN=$HF_TOKEN bash jobs/deploy-optimized.sh
 #   -> npa workbench cosmos deploy --runtime serverless --model nvidia/Cosmos3-Nano-Policy-DROID
 #      --gpu-type gpu-h200-sxm --gpu-preset 1gpu-16vcpu-200gb --env ... --auth token --wait
 
 # Measure / gate the deployed endpoint with the repo harness:
-python run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E6
+python run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E4
 ```
 
 Full runbook (baseline vs optimized, RoboLab gate, teardown, and the verified-flags reference)

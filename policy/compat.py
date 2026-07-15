@@ -12,7 +12,7 @@ so a config can only run techniques its backend actually supports:
       elsewhere).
 
 So Cache-DiT and FP8 are vLLM-Omni ONLY — the native-PyTorch waterfall stops at the Reasoner
-cache (E0..E4); E5/E6 are vLLM-Omni rungs. This is the whole point of the waterfall (native
+cache; the FP8 rung (E4) is vLLM-Omni-only. This is the whole point of the waterfall (native
 PyTorch reference) vs. production-validation (vLLM/vLLM-Omni) distinction (§4 Jobs 1 vs 2).
 
 It also records technique pairs that do NOT compose cleanly, so the harness can warn (§9):

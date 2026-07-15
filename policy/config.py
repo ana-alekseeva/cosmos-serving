@@ -63,7 +63,7 @@ class DatasetConfig:
     action_chunk: tuple = (32, 8)                 # the only evaluated task (§1): 32 steps × 8 DoF
     replay_size: int = 50                         # MEASURED requests/config = the 50 unique obs, once each
     replay_seed: int = 20260713                   # deterministic → reproducible logs (§10)
-    capability_groups: tuple = ("pick_place", "articulated", "tool_use")
+    capability_groups: tuple = ("visual", "relational", "procedural")   # RoboLab attribute families
     difficulty_levels: tuple = ("easy", "medium", "hard")
     tasks_per_cell: int = 2                        # 3 groups × 3 difficulty × 2 = 18 tasks
     episodes_per_task: int = 10

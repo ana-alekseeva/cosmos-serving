@@ -11,7 +11,9 @@ actions — not a pixel proxy (§1: "evaluated by executing its generated action
     run after the subset passes.
 
 The mock models per-task success so the gate logic + report render with no simulator. The
-real path drives RoboLab against a deployed endpoint (see jobs/robolab-eval.*).
+real path (policy/robolab_runner.py, launched by jobs/job3-robolab-subset.sky.yaml) drives
+RoboLab rollouts on the Isaac box against a deployed endpoint's OpenPI websocket route and
+gates on measured task success.
 """
 from __future__ import annotations
 
@@ -29,11 +31,15 @@ SUCCESS_DROP_THRESHOLD = CONFIG.quality_gate.robolab_success_drop
 
 def run_quality_subset(config: Config, *, backend: str = "mock",
                        endpoint: str | None = None,
-                       subset: list[QualityTask] | None = None, seed: int = 0) -> dict:
+                       subset: list[QualityTask] | None = None, seed: int = 0,
+                       robolab_root: Path | None = None,
+                       rollout_dir: Path | None = None,
+                       episodes: int | None = None) -> dict:
     """Run the 18-task subset for one configuration -> per-task + overall success."""
     subset = subset or quality_subset()
     if backend != "mock":
-        return _run_real_robolab(config, endpoint, subset)      # VERIFY: on the RT-core box
+        return _run_real_robolab(config, endpoint, subset, robolab_root=robolab_root,
+                                 rollout_dir=rollout_dir, episodes=episodes)
     from policy.mock.robolab import config_success              # modeled success (no simulator)
     per_task = []
     for t in subset:
@@ -47,12 +53,16 @@ def run_quality_subset(config: Config, *, backend: str = "mock",
 
 
 def compare(baseline_cid: str, candidate_cid: str, *, backend: str = "mock",
-            endpoint_baseline: str | None = None, endpoint_candidate: str | None = None) -> dict:
+            endpoint_baseline: str | None = None, endpoint_candidate: str | None = None,
+            robolab_root: Path | None = None, rollout_dir: Path | None = None,
+            episodes: int | None = None) -> dict:
     """Subset comparison + accept/reject vs SUCCESS_DROP_THRESHOLD (§9 lossy gate)."""
     base = run_quality_subset(config_by_id(baseline_cid), backend=backend,
-                              endpoint=endpoint_baseline)
+                              endpoint=endpoint_baseline, robolab_root=robolab_root,
+                              rollout_dir=rollout_dir, episodes=episodes)
     cand = run_quality_subset(config_by_id(candidate_cid), backend=backend,
-                              endpoint=endpoint_candidate)
+                              endpoint=endpoint_candidate, robolab_root=robolab_root,
+                              rollout_dir=rollout_dir, episodes=episodes)
     drop = round(base["overall_success"] - cand["overall_success"], 4)
     return {
         "baseline": baseline_cid, "candidate": candidate_cid,
@@ -64,12 +74,23 @@ def compare(baseline_cid: str, candidate_cid: str, *, backend: str = "mock",
     }
 
 
-def _run_real_robolab(config: Config, endpoint: str | None, subset) -> dict:
-    raise NotImplementedError(
-        "Real RoboLab eval runs on an RT-core GPU (Isaac Sim/Isaac Lab), not the H200 "
-        "vLLM-Omni image (§4 Job 3). Drive it via jobs/robolab-eval.*; the mock models "
-        "success offline."
-    )
+def _run_real_robolab(config: Config, endpoint: str | None, subset, *,
+                      robolab_root: Path | None = None,
+                      rollout_dir: Path | None = None,
+                      episodes: int | None = None) -> dict:
+    """Real RoboLab eval — Isaac Sim/Isaac Lab on an RT-core box (§4 Job 3), rollouts
+    against the endpoint's OpenPI websocket route. Import stays local: the driver is
+    Isaac-box-only and the mock path must not pay for it."""
+    from policy.robolab_runner import run_quality_subset_real
+
+    if robolab_root is None:
+        raise ValueError(
+            f"{config.cid}: real RoboLab eval needs --robolab-root (the NVLabs/RoboLab "
+            "checkout on the Isaac box; jobs/job3-robolab-subset.sky.yaml sets it). "
+            "The mock backend needs no simulator.")
+    return run_quality_subset_real(
+        config, endpoint, subset, robolab_root=robolab_root,
+        rollout_dir=rollout_dir or Path("results") / "robolab", episodes=episodes)
 
 
 def write_report(result: dict, path: str | Path) -> Path:
