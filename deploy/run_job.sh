@@ -6,7 +6,11 @@
 #
 # Env (pass via `nebius ai job create --env ... / --env-secret ...`):
 #   HF_TOKEN            (secret, required)   HF login for the gated Cosmos3-Nano-Policy-DROID
-#   BACKEND=pytorch     pytorch (P->pytorch, E->vLLM) | vllm (everything on vLLM/vLLM-Omni)
+#   BACKEND=pytorch     pytorch (native P ladder, deploy/Dockerfile image) | vllm (production
+#                       E configs via vLLM/vLLM-Omni, deploy/Dockerfile.vllm image — Job 2:
+#                       BACKEND=vllm CONFIGS=E0,E6 OUTPUT_PREFIX=production/)
+#   OUTPUT_PREFIX=      appended to OUTPUT_URI (job-specific S3 subdir; .env wins over --env
+#                       for OUTPUT_URI itself)
 #   MODE=matrix         matrix (run_matrix.py) | multigpu (run_multigpu.py, needs >=2 GPUs) |
 #                       profile (torch.profiler Chrome traces ONLY -> ${OUTPUT_URI}raw/traces/,
 #                       open at https://ui.perfetto.dev; no matrix)
@@ -25,14 +29,20 @@ cd "$SERVING"
 # launch:  nebius ai job create --inject-file .env:/opt/cosmos-serving/.env ...
 # Values in .env are applied to the environment (they win over any --env passed for the same key).
 [ -f "$SERVING/.env" ] && { set -a; . "$SERVING/.env"; set +a; }
+# .env wins over --env for OUTPUT_URI, so per-job destinations use OUTPUT_PREFIX instead
+# (e.g. job 2 passes --env OUTPUT_PREFIX=production/ -> ${OUTPUT_URI}production/).
+[ -n "${OUTPUT_PREFIX:-}" ] && OUTPUT_URI="${OUTPUT_URI:-}${OUTPUT_PREFIX}"
 : "${HF_TOKEN:?set HF_TOKEN (inject .env, or pass nebius --env-secret HF_TOKEN=...)}"
 : "${BACKEND:=pytorch}"; : "${MODE:=matrix}"; : "${CONFIGS:=}"
 # This native cu130 image has NO vLLM. The E-ladder (E0-E6) routes to the vLLM backend
 # (policy/compat.resolve_backend) and dies here with "No such file or directory: 'vllm'". So for the
 # pytorch matrix, default to the native P ladder unless CONFIGS is set explicitly. Run the E-ladder
 # on a separate --group vllm image (BACKEND=vllm CONFIGS=E0,...,E6).
-if [ "$MODE" = matrix ] && [ "$BACKEND" = pytorch ] && [ -z "$CONFIGS" ]; then
-  CONFIGS="P0,P1,P2,P3"
+if [ "$MODE" = matrix ] && [ -z "$CONFIGS" ]; then
+  # vllm default = Job 2's scope (§4): production baseline + final optimized ONLY, never the
+  # full matrix (P configs would route to the absent native stack on this image, and the spec
+  # explicitly says not to repeat the ablation ladder in production engines).
+  [ "$BACKEND" = pytorch ] && CONFIGS="P0,P1,P2,P3" || CONFIGS="E0,E6"
 fi
 : "${REPLAY_N:=50}"; : "${REPLAY_SIZE:=50}"; : "${WARMUPS:=5}"; : "${OUTPUT_DIR:=results}"
 mkdir -p /local/replay /local/model
@@ -58,9 +68,20 @@ MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml |
 # NB: `uv pip install` targets the active $VIRTUAL_ENV — pin --python or libs land in the wrong
 # venv (project-scoped `uv sync` is immune; setup.sh dodges it with `unset VIRTUAL_ENV`).
 PYMODEL="$FRAMEWORK/.venv/bin/python"
-( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server )
-uv pip install -qU --python "$PYMODEL" \
-    "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
+if [ "$BACKEND" = vllm ]; then
+  # vLLM image (deploy/Dockerfile.vllm): the vllm group ships vllm==0.19.1 + torch 2.10.0 (the
+  # PyPI cu12.8 build with its own bundled CUDA wheels) — the cu130 cuBLAS overrides do NOT apply.
+  # vLLM-Omni is a separate PyPI package the lock leaves out; the sync prunes it, so reinstall.
+  ( cd "$FRAMEWORK" && uv sync --all-extras --group vllm )
+  uv pip install -q --python "$PYMODEL" vllm-omni
+  # vLLM's server-side torch profiler flushes Chrome traces here on /start_profile (§ Job 2).
+  export VLLM_TORCH_PROFILER_DIR="${VLLM_TORCH_PROFILER_DIR:-/local/vllm_traces}"
+  mkdir -p "$VLLM_TORCH_PROFILER_DIR"
+else
+  ( cd "$FRAMEWORK" && uv sync --all-extras --group cu130 --group policy-server )
+  uv pip install -qU --python "$PYMODEL" \
+      "nvidia-cudnn-cu13>=9.22" "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
+fi
 uv pip install -q --python "$PYMODEL" -e "$SERVING"
 
 # Deterministic cuBLAS (the policy server runs with deterministic_seed=True) needs a workspace
@@ -151,11 +172,15 @@ fi
 # capture + 30GB download, once per config. Fail here, in seconds, with the real ImportError.
 irc=0
 if [ "$rc" -eq 0 ]; then
-  mods="import policy.runner"
-  [ "$BACKEND" = pytorch ] && mods="import iopath, policy.runner, policy.pytorch_engine, \
+  if [ "$BACKEND" = vllm ]; then
+    mods="import vllm, policy.runner, policy.serving"
+    "$FRAMEWORK/.venv/bin/vllm" --help >/dev/null 2>&1 || { echo "PREFLIGHT: vllm CLI missing"; irc=1; }
+  else
+    mods="import iopath, policy.runner, policy.pytorch_engine, \
 cosmos_framework.inference.args, cosmos_framework.scripts.action_policy_server_robolab, \
 cosmos_framework.scripts.action_policy_server_utils"
-  "$PYMODEL" -c "$mods; print('PREFLIGHT imports OK')" || irc=$?
+  fi
+  [ "$irc" -eq 0 ] && { "$PYMODEL" -c "$mods; print('PREFLIGHT imports OK')" || irc=$?; }
 fi
 echo "== END PREFLIGHT =="
 if [ "$rc" -ne 0 ]; then
@@ -211,6 +236,9 @@ if [ -n "${OUTPUT_URI:-}" ]; then
   ep=(); [ -n "${AWS_ENDPOINT_URL:-}" ] && ep=(--endpoint-url "$AWS_ENDPOINT_URL")
   aws s3 cp "$OUTPUT_DIR/" "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" "${ep[@]}" || true
   aws s3 cp "$OUTPUT_DIR/aggregate/" "${OUTPUT_URI}" --recursive "${ep[@]}" || true
+  # vLLM server-side profiler traces, if any were flushed (needs /start_profile wiring).
+  [ -n "${VLLM_TORCH_PROFILER_DIR:-}" ] && [ -n "$(ls -A "$VLLM_TORCH_PROFILER_DIR" 2>/dev/null)" ] \
+    && aws s3 cp "$VLLM_TORCH_PROFILER_DIR/" "${OUTPUT_URI}raw/traces/" --recursive "${ep[@]}" || true
 fi
 # Optional Perfetto traces alongside a matrix run (e.g. PROFILE_CONFIGS="P0 P3").
 if [ -n "${PROFILE_CONFIGS:-}" ]; then

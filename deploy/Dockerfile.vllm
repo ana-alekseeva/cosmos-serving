@@ -1,0 +1,52 @@
+# Cosmos3-Nano-Policy-DROID benchmark image — vLLM / vLLM-Omni (production) runtime, Job 2/2b.
+#
+# cosmos-framework declares `vllm` and `cu130` as CONFLICTING uv groups, so this is the SEPARATE
+# production image (E ladder / E0,E6 validation); the native P0-P3 ladder runs on deploy/Dockerfile.
+# The vllm group ships vllm==0.19.1 + torch==2.10.0 (the PyPI cu12.8 build with its own bundled
+# CUDA wheels — none of the cu130 cuBLAS overrides the native image needs apply here).
+# vLLM-Omni is NOT in the vllm group; it is a separate PyPI package (`vllm-omni`) that provides
+# the omni/policy serve path (`vllm serve --omni` — VERIFY the entrypoint on-box).
+#
+# Build (context = repo root; wheels are linux/x86_64 -> build --platform linux/amd64):
+#   docker build -f deploy/Dockerfile.vllm -t <registry>/cosmos-droid-vllm:latest .
+ARG CUDA_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04
+FROM ${CUDA_IMAGE}
+
+ARG COSMOS_FRAMEWORK_REPO=https://github.com/NVIDIA/cosmos-framework
+ARG COSMOS_FRAMEWORK_REF=main
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PATH="/root/.local/bin:${PATH}" \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    VENV_HARNESS=/opt/cosmos-serving/.venv \
+    VENV_MODEL=/opt/cosmos-framework/.venv
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git curl ca-certificates ffmpeg build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && uv --version
+
+WORKDIR /opt
+COPY . /opt/cosmos-serving
+RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_REPO}" /opt/cosmos-framework
+
+# 1) Harness venv: mock / DROID capture (tfds via the `capture` extra).
+RUN cd /opt/cosmos-serving && uv sync --extra capture
+
+# 2) Model venv: the vllm group (vllm==0.19.1 + torch 2.10.0 cu128) + vllm-omni from PyPI + this
+#    harness editable. NB: NEVER `uv run` after the pip installs — it auto-syncs back to the lock
+#    and removes them (use .venv/bin/python directly).
+RUN cd /opt/cosmos-framework \
+    && uv sync --all-extras --group vllm \
+    && uv pip install vllm-omni \
+    && uv pip install -e /opt/cosmos-serving \
+    && py=/opt/cosmos-framework/.venv/bin/python \
+    # import smoke: a missing dep fails the BUILD, not a paid GPU job
+    && $py -c 'import vllm, policy; print("import smoke OK, vllm", vllm.__version__)' \
+    && /opt/cosmos-framework/.venv/bin/vllm --help >/dev/null && echo "vllm CLI OK"
+
+RUN mkdir -p /local/model /local/replay
+WORKDIR /opt/cosmos-serving
+CMD ["/bin/bash"]
