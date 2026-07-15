@@ -13,8 +13,6 @@ from dataclasses import dataclass, field
 
 from policy.config import (  # single source of truth (experiment.yaml)
     CONFIG,
-    GeneratorSampling,
-    ReasonerSampling,
 )
 
 # R and G ladders measured the SAME single MoT inference -> merged into ONE native ladder P.

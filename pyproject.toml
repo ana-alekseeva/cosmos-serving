@@ -47,7 +47,14 @@ capture = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6",
 ]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]     # pycodestyle, pyflakes, isort, pyupgrade
 
 [tool.uv]
 # Flat app layout (policy/ package + top-level run_*.py importable via cwd); don't build/install.

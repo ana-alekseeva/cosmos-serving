@@ -34,10 +34,13 @@ class _StageHooks:
         import torch
 
         def pre(_m, _inp):
-            s = torch.cuda.Event(enable_timing=True); s.record(); self._pending[name] = s
+            s = torch.cuda.Event(enable_timing=True)
+            s.record()
+            self._pending[name] = s
 
         def post(_m, _inp, _out):
-            e = torch.cuda.Event(enable_timing=True); e.record()
+            e = torch.cuda.Event(enable_timing=True)
+            e.record()
             self.calls.setdefault(name, []).append((self._pending.pop(name, None), e))
 
         self._handles += [module.register_forward_pre_hook(pre),
@@ -65,13 +68,13 @@ def _find(model, names):
 
 def _build_service(checkpoint: str, config: Config, gen):
     """RobolabPolicyService subclassed to inject the compile / CUDA-graph flags."""
-    from cosmos_framework.inference.args import OmniSetupOverrides                       # VERIFY
-    from cosmos_framework.scripts.action_policy_server_robolab import (                  # VERIFY
+    from cosmos_framework.inference.args import OmniSetupOverrides  # VERIFY
+    from cosmos_framework.scripts.action_policy_server_robolab import (  # VERIFY
         _DEFAULT_ROBOLAB_OUTPUT_DIR,
         RobolabPolicyService,
         RobolabServerArgs,
     )
-    from cosmos_framework.scripts.action_policy_server_utils import (                     # VERIFY
+    from cosmos_framework.scripts.action_policy_server_utils import (  # VERIFY
         disable_runtime_ema_for_frozen_config,
     )
 
@@ -146,7 +149,7 @@ class PyTorchPolicyEngine:
 
     def run_request(self, req: DroidRequest) -> LatencyRecord:
         import torch
-        from cosmos_framework.scripts.action_policy_server_robolab import (   # VERIFY
+        from cosmos_framework.scripts.action_policy_server_robolab import (  # VERIFY
             _build_data_batch_from_sample,
         )
 
@@ -203,6 +206,7 @@ class PyTorchPolicyEngine:
     def _obs(self, req: DroidRequest) -> dict:
         """Raw DROID observation dict for RobolabPolicyService._build_sample (3-view concat + proprio + prompt)."""
         import numpy as np
+
         from policy.capture import load_capture
 
         o = load_capture(req.capture_ref)

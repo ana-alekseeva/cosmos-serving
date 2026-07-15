@@ -16,7 +16,7 @@ import json
 import platform
 import sys
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from policy.configs import GENERATOR_SAMPLING, REASONER_SAMPLING
@@ -24,7 +24,7 @@ from policy.measure import LatencyRecord, summarize
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def write_jsonl(records: list[LatencyRecord], path: str | Path, *,

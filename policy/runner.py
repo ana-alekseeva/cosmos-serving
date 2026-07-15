@@ -6,7 +6,7 @@ before the next one starts. This module is the importable core; run_configuratio
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from policy.configs import Config, config_by_id
@@ -24,7 +24,7 @@ from policy.pipeline import make_engine
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def set_torchinductor_cache(config: Config, root: str) -> str:

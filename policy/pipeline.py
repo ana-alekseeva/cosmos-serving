@@ -1,4 +1,7 @@
-"""Policy inference pipeline — REAL backend + engine factory. One request = one DROID observation -> one 32x8 action chunk."""
+"""Policy inference pipeline — REAL backend + engine factory.
+
+One request = one DROID observation -> one 32x8 action chunk.
+"""
 from __future__ import annotations
 
 import warnings

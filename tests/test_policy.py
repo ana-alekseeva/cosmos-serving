@@ -5,11 +5,12 @@ acceptance, quality gate), not the mock's modeled constants nor matplotlib rende
 """
 import json
 from dataclasses import replace as dc_replace
-from pathlib import Path
 
 import pytest
 
+from policy import compat, robolab, robolab_runner
 from policy.aggregate import aggregate, build_stage_breakdown, load_results
+from policy.compat import UnsupportedTechnique
 from policy.configs import (
     ACTION_CHUNK,
     END_TO_END,
@@ -22,17 +23,12 @@ from policy.configs import (
     STAGES,
     all_configs,
     config_by_id,
-    ladder,
 )
-from policy import compat
-from policy.compat import UnsupportedTechnique
 from policy.dataset import quality_subset
 from policy.experiment import Experiment
 from policy.matrix import run_matrix
-from policy.measure import LatencyRecord
 from policy.mock.replay import build_mock_replay, write_mock_manifest
 from policy.pipeline import make_engine
-from policy import robolab, robolab_runner
 
 
 # -- Config matrix -----------------------------------------------------------

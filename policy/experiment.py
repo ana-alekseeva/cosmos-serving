@@ -42,7 +42,7 @@ class Experiment:
     wait_between_seconds: float = _R.wait_between_seconds
     baseline_drift_reject_pct: float = _R.baseline_drift_reject_pct   # reject if baselines differ by more
 
-    def override(self, **kw) -> "Experiment":
+    def override(self, **kw) -> Experiment:
         return replace(self, **{k: v for k, v in kw.items() if v is not None})
 
 

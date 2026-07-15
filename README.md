@@ -1,51 +1,33 @@
-# Serving and benchmarking Cosmos3-Nano-Policy-DROID
+# Latency Optimization and Benchmarking of Cosmos3-Nano-Policy-DROID
 
-**A robot cannot wait for the next token.** To act, a policy must combine camera views, a
-language instruction, and robot state, then return an action chunk quickly enough to remain
-inside the control loop.
+A robot has only a short window to decide what to do next. To implement an instruction to place a candy bar on a shelf successfully, the policy must combine camera views, the instruction, and the robot state, then generate an action chunk fast enough to keep the control loop responsive.
+This project shows how to serve that policy, observe its execution, and systematically reduce its observation-to-action latency.
 
 This repository is a reproducible example of serving
 `Cosmos3-Nano-Policy-DROID` with vLLM / vLLM-Omni and measuring its
-observation-to-action latency on an NVIDIA H100.
+observation-to-action latency and evaluating its perfromance.
 
-<table>
-  <tr>
-    <td width="33%"><img src="docs/assets/droid_exterior_1.png" alt="DROID exterior camera 1 showing a Franka robot arm, a yellow cup, and the target object."></td>
-    <td width="33%"><img src="docs/assets/droid_exterior_2.png" alt="DROID exterior camera 2 showing the robot workspace from a second angle."></td>
-    <td width="33%"><img src="docs/assets/droid_wrist.png" alt="DROID wrist camera showing the gripper approaching the target object."></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Exterior camera 1</sub></td>
-    <td align="center"><sub>Exterior camera 2</sub></td>
-    <td align="center"><sub>Wrist camera</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/assets/droid_exterior_1.png" width="33.33%" alt="DROID exterior camera 1 showing a Franka robot arm, a yellow cup, and the target object."><img src="docs/assets/droid_exterior_2.png" width="33.33%" alt="DROID exterior camera 2 showing the robot workspace from a second angle."><img src="docs/assets/droid_wrist.png" width="33.33%" alt="DROID wrist camera showing the gripper approaching the target object."><br>
+  <sub>Exterior camera 1 · Exterior camera 2 · Wrist camera</sub>
+</p>
 
 The repository illustrates the complete serving loop:
 
-1. Package and deploy the policy.
+1. Package and deploy the Cosmos3-Nano-Policy-DROID.
 2. Validate the endpoint before measuring it.
 3. Replay the same DROID observations across optimization configurations.
 4. Record end-to-end latency, server stages, environment metadata, and GPU traces.
-5. Test the pipeline locally and quality-gate lossy optimizations.
+5. Evaluate the performance of the optimized models.
+6. Test the pipeline locally.
 
-## Serving best practices demonstrated here
+## Serving best practices
 
-| Practice | How it is applied |
-|---|---|
-| **Reproducible configuration** | Model settings and E0–E4 flags live in versioned config files. The run records package versions, engine flags, GPU details, seeds, and configuration order. |
-| **Representative inputs** | Every configuration receives the same 50 observations from DROID, the dataset used to post-train this checkpoint. |
-| **Warm-up before measurement** | Compilation, autotuning, and graph capture happen during 50 discarded warm-up requests. |
-| **Separate profiling from timing** | Reported latency comes from unprofiled requests. One additional request is traced afterward for attribution, so profiler overhead does not bias the result. |
-| **Layered observability** | The harness records client wall time, server stage durations, one JSONL row per request, system metadata, and vLLM-Omni traces viewable in Perfetto. |
-| **Test before spending GPU time** | A mock backend exercises the full logging and plotting pipeline locally; unit tests verify the harness. |
-| **Quality-gate lossy changes** | E0–E3 are intended to preserve the model computation. E4 uses FP8 and is accepted only after a separate closed-loop RoboLab comparison. |
-| **Clean resource lifecycle** | Deployment waits for readiness, sends a smoke request, and provides an explicit teardown command. |
+The project follows practical serving and benchmarking best practices: versioned and reproducible configurations, representative fixed inputs, warm-up before measurement, separation of profiling from latency timing, structured per-request logs and Perfetto traces, local smoke tests and unit tests, readiness checks and explicit resource teardown, and a closed-loop quality gate for the lossy FP8 configuration.
 
 ## Optimization waterfall
 
 The configurations are cumulative: each row keeps the techniques introduced above it.
-This makes the change between adjacent configurations easier to interpret.
 
 | Configuration | Adds | Why it should help one request | Observed change from previous row |
 |---|---|---|---:|
@@ -56,9 +38,9 @@ This makes the change between adjacent configurations easier to interpret.
 | **E4 — FP8** | Dynamic FP8 for supported kernels | Reduces memory traffic and accelerates supported Tensor Core work. It is lossy and must be quality-gated. | **−8%** |
 
 The list is shorter than a typical LLM-serving optimization matrix. Several
-diffusion-specific techniques—faster samplers, step distillation, feature caching, and
-specialized serving systems—are active research areas, but they are not yet drop-in,
-validated options for this policy and serving path.
+diffusion-specific techniques such as faster samplers, step distillation, feature caching, and
+specialized serving systems are active research areas, but they are not yet drop-in,
+validated options for this model.
 
 ## Reproduce the benchmark
 
@@ -122,10 +104,15 @@ kernel launches, CPU/GPU overlap, and model-stage execution.
 ## Serve the optimized policy as an endpoint
 
 The benchmark job manages its own serving process. To deploy E4 as a reusable serverless
-endpoint, build the serving image and launch it with the provided helper:
+endpoint we use the [Nebius Physical AI workbench](https://github.com/nebius/nebius-physical-ai)
+(`npa`), which provisions and serves the Cosmos3 policy on managed Nebius infrastructure.
+
+Install `npa` separately with
+`deploy/install_npa.sh`, and re-run that script after any `uv sync`. Build the serving image
+and launch it with the provided helper:
 
 ```bash
-bash deploy/install_npa.sh
+bash deploy/install_npa.sh          # clone + editable-install the npa workbench (not via uv sync)
 npa configure --interactive
 export HF_TOKEN=<hugging-face-token>
 
@@ -164,16 +151,14 @@ The full cumulative stack reduced median observation-to-action latency from **1,
 The first row shows unprofiled end-to-end results. The second row uses the separate profiler
 request to explain where GPU time is spent.
 
-<table>
-  <tr>
-    <td width="50%" align="center"><img src="docs/assets/waterfall.png" height="260" alt="Cumulative end-to-end latency waterfall for E0 through E4."><br><sub>End-to-end latency waterfall</sub></td>
-    <td width="50%" align="center"><img src="docs/assets/stage-breakdown.png" height="260" alt="Pipeline-stage latency breakdown comparing E0 and E4."><br><sub>Pipeline-stage breakdown</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center"><img src="docs/assets/cuda-time.png" width="100%" alt="CUDA-time composition by model component across E0 through E4."><br><sub>CUDA time by model component</sub></td>
-    <td width="50%" align="center"><img src="docs/assets/kernel-time-composition.png" width="100%" alt="Kernel-time composition across E0 through E4."><br><sub>Kernel-time composition</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/assets/waterfall.png" width="50%" alt="Cumulative end-to-end latency waterfall for E0 through E4."><img src="docs/assets/stage-breakdown.png" width="50%" alt="Pipeline-stage latency breakdown comparing E0 and E4."><br>
+  <sub>End-to-end latency waterfall · Pipeline-stage breakdown</sub>
+</p>
+<p align="center">
+  <img src="docs/assets/cuda-time.png" width="50%" alt="CUDA-time composition by model component across E0 through E4."><img src="docs/assets/kernel-time-composition.png" width="50%" alt="Kernel-time composition across E0 through E4."><br>
+  <sub>CUDA time by model component · Kernel-time composition</sub>
+</p>
 
 What the plots show:
 
@@ -195,6 +180,30 @@ Latency alone is not sufficient for a robotics policy. The optional
 simulation on 18 tasks, with matched settings and 10 episodes per task. E4 passes only if
 its overall task-success rate is no more than three percentage points below E0.
 
+RoboLab needs a different stack than the ablation (Isaac Sim 5.x + Isaac Lab on an RT-core
+GPU such as L40S / RTX PRO 6000 — **not** H200, which has no RT cores). Deploy one endpoint
+per side (baseline and optimized) with the workbench above, then run the two evaluation jobs
+in parallel — one endpoint each to stay under the wall-clock budget:
+
+```bash
+sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e0 \
+  --env ROLE=baseline  --env COSMOS_ENDPOINT_BASELINE=https://<baseline-endpoint>
+sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e4 \
+  --env ROLE=optimized --env COSMOS_ENDPOINT_OPTIMIZED=https://<optimized-endpoint>
+```
+
+After both jobs finish, apply the gate from the merged records (no simulator needed):
+
+```bash
+aws s3 sync "${OUTPUT_URI}raw/robolab/" results/robolab/ --endpoint-url "$AWS_ENDPOINT_URL"
+uv run python run_robolab.py --backend vllm --side both --robolab-root RoboLab \
+  --endpoint-baseline https://<baseline-endpoint> \
+  --endpoint-candidate https://<optimized-endpoint>
+```
+
+Fill the 18 task slots in [config/robolab_tasks.yaml](config/robolab_tasks.yaml) first — the
+job refuses to start otherwise.
+
 ## Key files
 
 - [config/experiment.yaml](config/experiment.yaml) — dataset, sampling, warm-up, seeds, and
@@ -206,3 +215,8 @@ its overall task-success rate is no more than three percentage points below E0.
   [jobs/deploy-optimized.sh](jobs/deploy-optimized.sh) — endpoint deployment.
 - [aggregate.py](aggregate.py) and [analyze_traces.py](analyze_traces.py) — plots and trace
   analysis.
+
+<p align="center">
+  <img src="docs/assets/droid_success.png" width="100%" alt="The DROID Franka arm holding the object after successfully completing the task."><br>
+  <em>I hope your robot completes its task as reliably as mine did—and a little faster, too.</em>
+</p>

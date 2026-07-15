@@ -157,7 +157,8 @@ def run_task(config: Config, qtask: QualityTask, task_name: str, *, robolab_root
                       python=python, runner=runner, client_policy=client_policy)
     log_path = record_path.with_suffix(".log")
     with log_path.open("w") as log:
-        log.write(" ".join(cmd) + "\n"); log.flush()
+        log.write(" ".join(cmd) + "\n")
+        log.flush()
         # cwd = the checkout: RoboLab resolves assets + its output/ dir relative to root.
         proc = subprocess.run(cmd, cwd=robolab_root, stdout=log, stderr=subprocess.STDOUT,
                               timeout=timeout_s)
