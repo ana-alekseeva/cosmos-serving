@@ -1,25 +1,21 @@
+# Python / tooling
 .venv/
 __pycache__/
 *.pyc
-.DS_Store
 .pytest_cache/
+*.egg-info/
+.DS_Store
 
-# Per-configuration subprocess outputs are bulky + regenerable (run_matrix.py). Keep the
-# aggregated figures/JSON (results/aggregate/), the archived old-framing results, and E6 as
-# one example of the §7 per-config log format.
-results/*/
-!results/aggregate/
-!results/_archive_old_framing/
-!results/E6/
-# throwaway sibling output dirs (smoke runs, production validation)
-results-smoke/
-results-production/
-# project-local editable checkout of the Nebius workbench (deploy/install_npa.sh)
-.nebius-physical-ai/
-# real DROID captures (policy/capture.py): bulky image tensors, regenerable from droid_100.
-# The committed mock fixture (policy/mock/manifest.json) is the only in-repo replay set.
+# Downloaded / generated run outputs. `results/` is the download target for job2 & job3;
+# keep the dir (results/.gitkeep) but ignore everything pulled into it.
+results/*
+!results/.gitkeep
+
+# Real DROID captures (policy/capture.py): bulky image tensors, regenerable.
 data/replay_real/
-# local secrets/config for jobs (jobs/with-env.sh); .env.example is the template
+
+# Local secrets (.env). .env.example is the committed template.
 .env
-results-production-v2/
-production-v2
+
+# Project-local editable checkout of the Nebius workbench (deploy/install_npa.sh).
+.nebius-physical-ai/

@@ -1,17 +1,13 @@
 # Job 2 — production-engine validation (specification_revised.txt §4).
 #
 # INFRA PROVISIONING ONLY. Validates ONLY the production baseline (E0) and the final optimized
-# configuration (E6) through the PRODUCTION serving stack — vLLM (Reasoner, Qwen3-VL path) +
-# vLLM-Omni (Generator / full policy). Does NOT repeat the whole ablation matrix (§4); that is
-# Job 1's readable PyTorch path. Produces §2 required output #5: "Production results using vLLM
-# and vLLM-Omni".
-#
-# The spec notes this MAY be two jobs if vLLM and vLLM-Omni need incompatible environments
-# (vLLM Reasoner validation; vLLM-Omni Generator/full-policy validation). Split by running with
-# CONFIGS="P0,P3" on a vLLM image and CONFIGS="E0,E6" on a vLLM-Omni image if so.
+# configuration (E4, FP8) through the PRODUCTION serving stack — vLLM (Reasoner, Qwen3-VL path) +
+# vLLM-Omni (Generator / full policy). Does NOT repeat the whole ablation matrix; the E-ladder
+# defined in policy/configs.py is E0..E4. Produces the "Production results using vLLM and
+# vLLM-Omni" output.
 #
 #   sky jobs launch jobs/job2-production-validation.sky.yaml --secret HF_TOKEN \
-#     --env CONFIGS=E0,E6
+#     --env CONFIGS=E0,E4
 
 name: cosmos-policy-production
 
@@ -28,7 +24,7 @@ envs:
   REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY
   REPO_REF: "main"
   # MODEL is read from config/experiment.yaml (single source of truth), not an env var.
-  CONFIGS: "E0,E6"                  # production baseline + final optimized ONLY (§4)
+  CONFIGS: "E0,E4"                  # production baseline (E0) + final optimized (E4, FP8) ONLY
   VLLM_TORCH_PROFILER_DIR: "/local/vllm_traces"   # vLLM writes Chrome traces here on /start_profile
   OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/production/"
   AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
@@ -59,10 +55,6 @@ run: |
     --backend vllm \
     --configurations "${CONFIGS}"
   uv run python aggregate.py --out-dir results-production
-
-  # torch.profiler Chrome traces (Perfetto dashboard) -> ${OUTPUT_URI}raw/traces/. Self-guards:
-  # skips unless the native-PyTorch stack (cosmos_framework + checkpoint) is present.
-  bash deploy/profile_and_upload.sh /local/replay/manifest.json || true
 
   if command -v aws >/dev/null 2>&1; then
     aws s3 cp results-production/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "${AWS_ENDPOINT_URL}"

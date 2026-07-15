@@ -1,190 +1,153 @@
-# cosmos-serving — Cosmos3-Nano-Policy-DROID latency attribution & optimization
+# cosmos-serving — Cosmos3-Nano-Policy-DROID latency validation
 
-Attribute and reduce the inference latency of **`Cosmos3-Nano-Policy-DROID`** on the *only*
-evaluated task ([specification_revised.txt](specification_revised.txt) §1):
+Validate and analyze the inference latency of **`Cosmos3-Nano-Policy-DROID`** through the
+production **vLLM / vLLM-Omni** serving stack, and gate the lossy optimization (FP8) on
+**RoboLab** task success.
 
-```text
-DROID camera observations + language instruction + proprioceptive state
-    → 32 × 8 robot-action chunk
-```
+The repo is scoped to two cloud jobs plus local analysis:
 
-The model is evaluated by executing its generated actions in **RoboLab**. This repo runs the
-single-GPU PyTorch ablation matrix, attributes each optimization to the pipeline stage it
-shrinks, validates the winner through the production vLLM / vLLM-Omni engines, and gates the
-lossy techniques on RoboLab task success.
-
-## Two waterfalls (specification_revised.txt §3)
-
-| Waterfall | Rungs | Measures |
+| Job | File | What it does |
 |---|---|---|
-| **Native PyTorch (P)** | P0 cuDNN-fused → +`torch.compile` → +CUDA graphs → **+conditioning cache** | `total_chunk_ms` (+ per-stage breakdown) |
-| **End-to-end (E, vLLM)** | E0 eager (SDPA) → +Flash (FA3) → +compile → +CUDA graphs → +FP8 → **final** | `total_chunk_ms` |
+| **Job 2** | [jobs/job2-production-validation.sky.yaml](jobs/job2-production-validation.sky.yaml) | Runs the production baseline **E0** and final optimized **E4 (FP8)** through vLLM / vLLM-Omni on an H200, uploads raw per-config results + traces to object storage. |
+| **Job 3** | [jobs/job3-robolab-subset.sky.yaml](jobs/job3-robolab-subset.sky.yaml) | Runs the 18-task RoboLab subset against a baseline and an optimized endpoint, uploads success records, and gates FP8 on task success. |
 
-The old reasoner (R) and generator (G) ladders are merged into one native ladder **P** — they ran the
-same single MoT inference and gave identical on-box numbers. FP8 is vLLM-only (§5.3.3), on E.
-Cache-DiT and the cross-request reasoner cache were REMOVED from the E ladder after the H100
-measurements: Cache-DiT never activates at 4 denoising steps AND its adapter bypasses the
-compiled transformer (+170 ms net); the reasoner cache has no stock vllm-omni implementation
-(rationale + trace evidence in policy/configs.py).
-
-FP8 is **lossy → quality-gated**: included in the final configuration only if
-RoboLab success holds (§3, §9). The multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel)
-run as a **separate** experiment (§3) — never mixed into the single-GPU waterfall.
-
-## Run it (mock backend — no GPU)
-
-The harness runs end-to-end on the **mock backend** (a modeled per-stage latency table anchored
-to the spec's §7 example log) so the plumbing, per-request JSONL logs, waterfalls, stage
-breakdown, and aggregation are validated before the GPU. Swap `--backend mock` → `--backend vllm`
-on the target inference GPU.
+The optimization ladder (`E0..E4`) is defined in [policy/configs.py](policy/configs.py):
+`E0` eager (SDPA) → `E1` +Flash Attention → `E2` +torch.compile → `E3` +CUDA graphs → `E4` +FP8 (lossy).
 
 Managed with [uv](https://docs.astral.sh/uv/).
 
+---
+
+## 0. One-time setup
+
 ```bash
-uv sync
-
-# Job 1 — the full single-GPU ablation matrix (P0-P3, E0-E4) with §8 bias controls
-# (baseline at start+end, randomized order, drift rejection), each config an isolated subprocess:
-uv run python run_matrix.py --config config/experiment.yaml \
-    --input-manifest policy/mock/manifest.json --output-dir results --backend mock
-
-# Job 5 — aggregate: waterfalls + stage breakdown + CIs + CSV/Parquet + quality tables + figures:
-uv run python aggregate.py --out-dir results
-#   -> results/aggregate/waterfall_{native,end_to_end}.png
-#      results/aggregate/stage_breakdown.png, quality_comparison.png, summary.csv
-
-# One configuration on its own (the §7 per-config artifacts):
-uv run python run_configuration.py --configuration P0 --backend mock --out-dir results
-
-# RoboLab subset quality gate (baseline vs final) — the lossy FP8 gate:
-uv run python run_robolab.py --baseline E0 --candidate E4
-
-# Separate multi-GPU experiment (CFG-Parallel + Ulysses vs best single-GPU):
-uv run python run_multigpu.py --backend mock
+uv sync                          # create the .venv and install deps
+cp .env.example .env             # then fill in the secrets below
 ```
 
-Example end-to-end result (mock, 4-step DROID recipe): **E0 ≈ 230 ms → E4 ≈ 145 ms (1.6×)**,
-dominated by torch.compile fusing the norm/RoPE elementwise mass (real H100 numbers:
-E0 1537 ms → E3 1276 ms p50, −17%; FP8 flat on latency but 30.7→17.3 GB VRAM); FP8 passes the
-RoboLab subset gate. See `results-production/analysis/`.
+`.env` supplies credentials used by the download/upload steps (sourced automatically by
+`jobs/aggregate-local.sh`):
 
-## Layout
+```bash
+HF_TOKEN=...                     # Hugging Face token (model download)
+AWS_ACCESS_KEY_ID=...            # Nebius object-storage key
+AWS_SECRET_ACCESS_KEY=...
+AWS_ENDPOINT_URL=https://storage.eu-north1.nebius.cloud
+OUTPUT_URI=s3://serverless-challenge/cosmos3-ablation-results/
+```
+
+Cloud jobs are launched with [SkyPilot](https://docs.skypilot.co/) (`sky`) against a
+Kubernetes-backed Nebius cluster. Confirm every `# VERIFY` comment in the two job YAMLs
+(image tags, repo URL, endpoint URLs) before trusting the numbers.
+
+---
+
+## 1. Run Job 2 — production validation (E0 vs E4)
+
+```bash
+sky jobs launch jobs/job2-production-validation.sky.yaml --secret HF_TOKEN --env CONFIGS=E0,E4
+```
+
+The job captures the real DROID replay set, runs `run_matrix.py` (backend `vllm`) for `E0,E4`,
+aggregates inline, and uploads to `s3://serverless-challenge/cosmos3-ablation-results/production/`
+(raw per-config logs under `production/raw/`, vLLM profiler traces under `production/raw/traces/`).
+
+## 2. Run Job 3 — RoboLab subset gate
+
+Job 3 scores two **already-deployed** endpoints (baseline + optimized). Deploy them first with
+the workbench tooling (optional — see [jobs/deploy-optimized.sh](jobs/deploy-optimized.sh) /
+[deploy/install_npa.sh](deploy/install_npa.sh)), then fill the 18 task slots in
+[config/robolab_tasks.yaml](config/robolab_tasks.yaml) (the run refuses to start until they are).
+
+Launch one job per endpoint (they run in parallel):
+
+```bash
+sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e0 \
+  --env ROLE=baseline  --env COSMOS_ENDPOINT_BASELINE=https://<baseline-endpoint>
+sky jobs launch jobs/job3-robolab-subset.sky.yaml -c robolab-e4 \
+  --env ROLE=optimized --env COSMOS_ENDPOINT_OPTIMIZED=https://<optimized-endpoint>
+```
+
+Records upload to `s3://serverless-challenge/robolab-eval-results/subset/raw/robolab/`.
+
+---
+
+## 3. Download the results into `results/`
+
+`results/` is the local download target (git-ignored except for `.gitkeep`).
+
+```bash
+set -a && source .env && set +a
+
+# Job 2 raw results (per-config latency logs + traces)
+aws s3 cp s3://serverless-challenge/cosmos3-ablation-results/production/raw/ results/ \
+  --recursive --endpoint-url "$AWS_ENDPOINT_URL"
+
+# Job 3 RoboLab records (optional — for the local gate)
+aws s3 sync s3://serverless-challenge/robolab-eval-results/subset/raw/robolab/ results/robolab/ \
+  --endpoint-url "$AWS_ENDPOINT_URL"
+```
+
+## 4. Create the Job 2 plots
+
+**Summary figures** (waterfall, stage breakdown, quality comparison) — the primary Job 2 plots:
+
+```bash
+uv run python aggregate.py --out-dir results
+#   -> results/aggregate/waterfall_end_to_end.png
+#      results/aggregate/stage_breakdown.png
+#      results/aggregate/quality_comparison.png   (+ summary.csv, *.json)
+```
+
+Or use the one-shot helper, which downloads the raw trees from object storage **and** aggregates:
+
+```bash
+./jobs/aggregate-local.sh                 # download + aggregate + re-upload figures
+NO_UPLOAD=1 ./jobs/aggregate-local.sh     # local figures only, no upload
+```
+
+**Trace deep-dive figures** (latency ECDFs, latency-vs-VRAM Pareto, kernel/model-part
+attribution) from the vLLM profiler traces:
+
+```bash
+uv run python analyze_traces.py --results-dir results --traces results/traces.tar.gz
+```
+
+To gate Job 3 (baseline vs optimized success rates) after both endpoints have run:
+
+```bash
+uv run python run_robolab.py --backend vllm --side both --robolab-root RoboLab \
+  --endpoint-baseline https://<baseline> --endpoint-candidate https://<optimized>
+```
+
+---
+
+## Repository layout
 
 | Path | Role |
 |---|---|
-| `run_matrix.py` | Job 1 — ablation-matrix orchestrator (subprocess per config, §8 bias controls) |
-| `run_configuration.py` | single configuration → the five §7 log artifacts |
-| `aggregate.py` | Job 5 — merge logs → CSV/Parquet + waterfalls + stage breakdown + CIs + figures |
-| `run_robolab.py` / `run_multigpu.py` | Jobs 3-4 quality gate / the separate multi-GPU experiment |
-| `config/experiment.yaml` | the experiment config (§4 `--config experiment.yaml`) |
-| `policy/configs.py` | the P0-P3 / E0-E4 configuration matrix + stage-effect model |
-| `policy/dataset.py` | fixed ~256-request replay set + the 18-task RoboLab quality subset (§5) |
-| `policy/pipeline.py` | mock per-stage latency engine + vLLM/vLLM-Omni real-backend stub |
-| `policy/measure.py` / `logs.py` | the §6 latency field set, p50/p90/p99, §7 log format |
-| `policy/matrix.py` / `runner.py` | matrix orchestration core / single-config runner core |
-| `policy/aggregate.py` / `plots.py` | aggregation + the waterfall / stage-breakdown / quality figures |
-| `policy/serving.py` | real-backend engine-flag mapping + the §9 forced-SDPA / static-shape rules |
-| `policy/robolab.py` / `multigpu.py` | RoboLab task-success gate / CFG-/Ulysses-parallel experiment |
-| `jobs/` | the five-job Nebius plan (§4) + optimized-endpoint deploy |
-| `workbench/` | Nebius infra-provisioning configs (serve the optimized policy endpoint) |
-| `results/` | waterfalls, stage breakdown, quality tables, CSV, one example per-config log dir |
+| `jobs/job2-*.sky.yaml`, `jobs/job3-*.sky.yaml` | The two SkyPilot cloud jobs |
+| `jobs/aggregate-local.sh` | Download raw results + regenerate Job 2 figures locally |
+| `jobs/deploy-optimized.sh`, `deploy/install_npa.sh`, `deploy/versions.env`, `workbench/` | Provision the baseline/optimized endpoints Job 3 scores (Nebius `npa` workbench) |
+| `run_matrix.py` | Ablation-matrix orchestrator (subprocess per config); driven by Job 2 |
+| `run_configuration.py` | Single configuration → per-config log artifacts (spawned by `run_matrix.py`) |
+| `run_robolab.py` | RoboLab quality gate; driven by Job 3 |
+| `aggregate.py` | Merge logs → CSV + waterfalls + stage breakdown + quality figures |
+| `analyze_traces.py` | Trace/profiler deep-dive figures (ECDF, Pareto, kernel/model-part) |
+| `config/experiment.yaml`, `config/robolab_tasks.yaml` | Experiment config + the 18 RoboLab task slots |
+| `policy/` | The pipeline: config matrix, replay dataset, latency measurement, aggregation, plots, vLLM serving contract, RoboLab runner |
+| `tests/` | Harness invariant tests (`uv run --group dev pytest`) |
+| `results/` | Local download target for Job 2 / Job 3 outputs |
+| `specification_revised.md` | Design spec (the `§` references throughout the code) |
 
-## Latency measurement (specification_revised.txt §6)
+## Local smoke test (no GPU)
 
-Every request records the full field set — `preprocess_ms h2d_ms reasoner_ms
-generator_prepare_ms denoising_ms denoising_step_ms[] postprocess_ms d2h_ms server_ms
-transport_ms first_action_ms total_chunk_ms peak_memory_mb` — with CUDA events for GPU stages
-and monotonic timers end-to-end, batch size 1, ~25 warm-ups (excluded), ≥200 measured requests,
-and p50/p90/p99 summaries. One JSONL row per request (§7) plus `summary.json`,
-`environment.json`, `system-info.json`, `status.json` per configuration.
-
-## Real backend (on the GPU)
-
-`--backend vllm` launches vLLM (Reasoner) / vLLM-Omni (Generator / full policy) with each
-configuration's engine flags and measures wall-clock from the server's per-stage timers.
+The pipeline runs end-to-end on the modeled **mock backend**, which validates the plumbing,
+logs, aggregation, and figures before spending GPU time:
 
 ```bash
-bash deploy/setup.sh                                        # deps + weights (one-time); prints run cmds
-uv run python -m policy.capture --n 50 --out /local/replay  # capture the real DROID replay set
-uv run python run_matrix.py --input-manifest /local/replay/manifest.json \
-    --output-dir results --backend pytorch                 # routes P->pytorch, E->vLLM-Omni
+uv run python run_matrix.py --input-manifest policy/mock/manifest.json \
+    --output-dir results --backend mock --configurations E0,E4
 uv run python aggregate.py --out-dir results
+uv run --group dev pytest -q
 ```
-
-**Before trusting the numbers**, confirm every `# VERIFY` in `policy/serving.py` against your
-installed vLLM / vLLM-Omni (engine flag names, the forced-SDPA Flash backend that must *fail*
-rather than silently fall back, static/bucketed shapes for the CUDA-graph configs, and the
-per-stage timing response). The mock stands in for all of this offline.
-
-## Run the ablation jobs on Nebius (`nebius ai job create`)
-
-The jobs run as containers. Build the **native (cu130) image** ([deploy/Dockerfile](deploy/Dockerfile)) —
-it bakes torch-cu130 + `cosmos_framework` + this harness and bumps cuDNN to ≥ 9.22 for the fused-attention
-baseline. cosmos-framework's `vllm` and `cu130` uv groups **conflict**, so this image is the native
-`P0–P3` runtime; the vLLM `E`-ladder + jobs 2/2b need a **separate `--group vllm` image**. All indexes are
-public — no build secret needed.
-
-Push it to a Nebius Container Registry:
-```bash
-PROJECT_ID=<project-id>; REGION=eu-north1
-nebius registry create --name cosmos-droid --parent-id "$PROJECT_ID"    # once; control plane shows id "registry-e00…"
-REGISTRY_ID=e00k6drmprp0pm6zcf                                          # ⚠ the id WITHOUT the "registry-" prefix — the
-                                                                       #   CR *path* uses the bare id (registry get shows the prefixed form)
-nebius iam get-access-token | docker login "cr.${REGION}.nebius.cloud" --username iam --password-stdin
-IMAGE="cr.${REGION}.nebius.cloud/${REGISTRY_ID}/cosmos-droid-bench-native:latest"
-docker build --platform linux/amd64 -f deploy/Dockerfile -t "$IMAGE" . # x86_64 wheels — build on x86 for speed
-docker push "$IMAGE"
-```
-
-> **Gotcha — the CR path uses the registry id *without* the `registry-` prefix.** `nebius registry get`
-> shows the id as `registry-e00k6drmprp0pm6zcf`, but the Container Registry data plane addresses the
-> registry by the bare `e00k6drmprp0pm6zcf`. If you tagged/pushed with the prefixed form you get
-> `error from registry: repository name not known to registry: Entity Registry not found by id registry-e00…`
-> (login still succeeds and the layers reach "Waiting" — it's a *path* mismatch, not auth). Retag to the
-> bare id and push — no rebuild:
-> ```bash
-> docker tag  cr.${REGION}.nebius.cloud/registry-e00k6drmprp0pm6zcf/cosmos-droid-bench-native:latest \
->             cr.${REGION}.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-bench-native:latest
-> docker push cr.${REGION}.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-bench-native:latest
-> ```
-
-Launch a job — [deploy/run_job.sh](deploy/run_job.sh) is the env-driven entrypoint (stages replay + model,
-runs the matrix, aggregates, optional S3 upload). Load secrets from `.env` first so the `$VARS` expand:
-```bash
-set -a && source .env && set +a          # HF_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-nebius ai job create --name cosmos-job1-native --parent-id "$PROJECT_ID" \
-  --image "$IMAGE" --platform gpu-h200-sxm --preset 1gpu-16vcpu-200gb --shm-size 64Gi \
-  --inject-file deploy/run_job.sh:/run_job.sh --container-command bash --args /run_job.sh \
-  --env BACKEND=pytorch --env MODE=matrix --env CONFIGS=P0,P1,P2,P3 \
-  --env REPLAY_SIZE=50 --env WARMUPS=5 --env OUTPUT_DIR=results \
-  --env HF_TOKEN="$HF_TOKEN"
-```
-`--timeout` is a *cap* (default 24h) — you're billed for actual runtime (~1–2 h for Job 1). The other jobs are
-the same shape with different `--preset`/`--env` (and the vLLM image): **2** `BACKEND=vllm CONFIGS=E0,E4`;
-**1b** `MODE=multigpu`; **2b** adds `TENSOR_PARALLEL_SIZE=2 PARALLEL=cfg`. ⚠ H200 has NO 2-GPU preset —
-only `1gpu-16vcpu-200gb` and `8gpu-128vcpu-1600gb` (verified via `nebius compute platform list`), so the
-multi-GPU jobs rent the 8-GPU preset and leave the surplus GPUs idle (or set `TENSOR_PARALLEL_SIZE=8`).
-
-## Create Nebius resources with the workbench (`npa`)
-
-Provision on Nebius with the **Nebius Physical AI workbench** (`npa`), installed into this
-project's venv. Commands below are the real, current CLI (npa 0.1.0), verified on-box.
-
-```bash
-# One-time: install npa editable into this project, then configure (needs the "AI Jobs" IAM role)
-bash deploy/install_npa.sh
-npa configure --interactive
-
-# Create a serverless AI endpoint for the optimized (E4) DROID policy — the workbench resource:
-MODE=optimized PROJECT_ALIAS=cosmos HF_TOKEN=$HF_TOKEN bash jobs/deploy-optimized.sh
-#   -> npa workbench cosmos deploy --runtime serverless --model nvidia/Cosmos3-Nano-Policy-DROID
-#      --gpu-type gpu-h200-sxm --gpu-preset 1gpu-16vcpu-200gb --env ... --auth token --wait
-
-# Measure / gate the deployed endpoint with the repo harness:
-python run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E4
-```
-
-Full runbook (baseline vs optimized, RoboLab gate, teardown, and the verified-flags reference)
-in [jobs/README.md](jobs/README.md). The ablation/eval logic stays **in this repo**; the
-workbench only provisions the infra — its own `npa … cosmos optimize` is a `Roadmap placeholder`,
-which we don't depend on.

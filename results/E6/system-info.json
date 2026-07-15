@@ -1,9 +1,0 @@
-{
-  "captured_at": "2026-07-14T08:17:05.857330+00:00",
-  "platform": "macOS-15.6-arm64-arm-64bit-Mach-O",
-  "processor": "arm",
-  "gpu": {
-    "available": false,
-    "reason": "nvidia-smi not found (mock/CPU host)"
-  }
-}
