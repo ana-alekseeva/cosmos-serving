@@ -77,7 +77,9 @@ if [ "$BACKEND" = vllm ]; then
   #     `except ImportError`: broken -> OSError crash on the vllm CLI path, absent -> clean skip;
   #   * cuBLAS 13.1.1.3 — cu13x torch means the H200+r580 13.1.0.3 GEMM bug applies here too.
   ( cd "$FRAMEWORK" && uv sync --group vllm )
-  uv pip install -q --python "$PYMODEL" vllm-omni \
+  # vllm-omni pinned to 0.20.0 to pair with vllm==0.19.1 (0.24 force-upgrades transformers>=5.5
+  # past what the lock resolved) — keep in lockstep with deploy/Dockerfile.vllm.
+  uv pip install -q --python "$PYMODEL" "vllm-omni==0.20.0" \
       "nvidia-cublas==13.1.1.3" "nvidia-cuda-runtime==13.0.96"
   uv pip uninstall -q --python "$PYMODEL" torchaudio 2>/dev/null || true
   # vLLM's server-side torch profiler flushes Chrome traces here on /start_profile (§ Job 2).
