@@ -6,7 +6,8 @@
 #
 # Launch (per role) — inject this script + the local .env (secrets), pass the endpoint by env:
 #   nebius ai job create --parent-id project-e00em6gppr002a5efwp7eb --name robolab-baseline \
-#     --image nvcr.io/nvidia/isaac-lab:2.3.2 --platform gpu-l40s-d --preset 1gpu-16vcpu-96gb \
+#     --image nvcr.io/nvidia/isaac-lab:2.3.2 --platform gpu-l40s-a --preset 1gpu-32vcpu-128gb \
+#     # gpu-l40s-a = Intel Ice Lake L40S (gpu-l40s-d is AMD Epyc — not available to this tenant)
 #     --inject-file deploy/run_robolab_job.sh:/run_robolab_job.sh --inject-file .env:/work/.env \
 #     --env ROLE=baseline --env COSMOS_ENDPOINT_BASELINE=https://<e0-url> \
 #     --container-command bash --args /run_robolab_job.sh
