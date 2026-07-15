@@ -5,7 +5,10 @@ This project shows how to serve that policy, observe its execution, and systemat
 
 This repository is a reproducible example of serving
 `Cosmos3-Nano-Policy-DROID` with vLLM / vLLM-Omni and measuring its
-observation-to-action latency and evaluating its perfromance.
+observation-to-action latency while evaluating its task performance.
+
+A more detailed overview of the `Cosmos3-Nano-Policy-DROID` internals is available in
+[this post](https://ana-alekseeva.com/posts/cosmos3-performance-engineering).
 
 <p align="center">
   <img src="docs/assets/droid_exterior_1.png" width="33.33%" alt="DROID exterior camera 1 showing a Franka robot arm, a yellow cup, and the target object."><img src="docs/assets/droid_exterior_2.png" width="33.33%" alt="DROID exterior camera 2 showing the robot workspace from a second angle."><img src="docs/assets/droid_wrist.png" width="33.33%" alt="DROID wrist camera showing the gripper approaching the target object."><br>
@@ -29,7 +32,7 @@ The project follows practical serving and benchmarking best practices: versioned
 
 The configurations are cumulative: each row keeps the techniques introduced above it.
 
-| Configuration | Adds | Why it should help one request | Observed change from previous row |
+| Configuration | Adds | Effect | Observed change from previous row |
 |---|---|---|---:|
 | **E0 — baseline** | BF16 eager execution with `TORCH_SDPA` | Establishes the reference serving path. | — |
 | **E1 — FlashAttention** | `FLASH_ATTN` | Avoids materializing the full attention matrix and reduces GPU memory traffic. | **−6%** |
@@ -37,10 +40,24 @@ The configurations are cumulative: each row keeps the techniques introduced abov
 | **E3 — CUDA graphs** | Capture and replay for graph-eligible execution | Reduces CPU launch overhead for repeated execution. | **+1%** |
 | **E4 — FP8** | Dynamic FP8 for supported kernels | Reduces memory traffic and accelerates supported Tensor Core work. It is lossy and must be quality-gated. | **−8%** |
 
-The list is shorter than a typical LLM-serving optimization matrix. Several
-diffusion-specific techniques such as faster samplers, step distillation, feature caching, and
-specialized serving systems are active research areas, but they are not yet drop-in,
-validated options for this model.
+This is a shorter list than is common in mature LLM serving stacks. Diffusion inference is
+still an active optimization area: faster samplers, step distillation, feature caching,
+compression, and specialized serving systems are summarized in this
+[survey of efficient diffusion models](https://openreview.net/forum?id=wHECkBOwyt). These
+methods are promising, but they are not yet drop-in, validated options for this Cosmos
+policy and vLLM-Omni serving path.
+
+The benchmark measures batch-one latency for a single robotics-policy request: images are
+inputs, and the output is a `[32, 8]` action chunk—not a generated image or video. Many
+diffusion optimizations instead target media generation, concurrent batching, high
+resolutions, or multi-GPU throughput. Cache-DiT was tested, but it consistently increased
+latency: Cosmos3 already computes the UND pathway once and caches its K/V state, so
+Cache-DiT can skip work only in the GEN layers while still paying for residual checks,
+cache management, and block selection. With only four denoising steps, too little work was
+skipped to recover that overhead ([vLLM-Omni's Cosmos3 Cache-DiT implementation](https://docs.vllm.ai/projects/vllm-omni/en/latest/api/vllm_omni/diffusion/cache/cache_dit_backend/)).
+Batching and distributed parallelism were also outside this one-request, one-H100 latency
+study; they belong in separate throughput and scaling benchmarks. The waterfall therefore
+focuses on basic techniques that could be applied and measured reliably for this workload.
 
 ## Reproduce the benchmark
 
@@ -217,6 +234,6 @@ job refuses to start otherwise.
   analysis.
 
 <p align="center">
-  <img src="docs/assets/droid_success.png" width="100%" alt="The DROID Franka arm holding the object after successfully completing the task."><br>
-  <em>I hope your robot completes its task as reliably as mine did—and a little faster, too.</em>
+  <img src="docs/assets/droid_success.png" width="50%" alt="The DROID Franka arm holding the object after successfully completing the task."><br>
+  <em>I hope your robot completes its task as reliably as mine did — and a little faster, too.</em>
 </p>
