@@ -140,8 +140,9 @@ def build_waterfall(results: dict[str, ConfigResult], waterfall: str) -> dict:
 
 
 def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
-    """Baseline (E0) vs final (E6) per-stage p50 — the §3 stage breakdown."""
-    rungs = [c for c in ladder(END_TO_END) if c.cid in results]
+    """Baseline vs final per-stage p50 — the §3 stage breakdown. Prefers the E ladder (E0 vs E6);
+    a native-only run (P configs, e.g. Job 1) falls back to the P ladder instead of emitting {}."""
+    rungs = next((r for r in ([c for c in ladder(wf) if c.cid in results] for wf in (END_TO_END, NATIVE)) if r), None)
     if not rungs:
         return {}
     baseline, final = rungs[0], rungs[-1]
