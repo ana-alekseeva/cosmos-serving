@@ -43,7 +43,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt
 COPY . /opt/cosmos-serving
-RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_REPO}" /opt/cosmos-framework
+# vllm-omni 0.24's lazy imports use the framework's OLD package layout (…data.vfm.…,
+# …model.vfm.…); the repo has since renamed vfm -> generator. Symlink the old names onto
+# the new dirs so both dotted paths resolve (no-op if a future ref restores/renames again).
+RUN git clone --depth 1 --branch "${COSMOS_FRAMEWORK_REF}" "${COSMOS_FRAMEWORK_REPO}" /opt/cosmos-framework \
+    && [ -e /opt/cosmos-framework/cosmos_framework/data/vfm ] \
+       || ln -s generator /opt/cosmos-framework/cosmos_framework/data/vfm \
+    && [ -e /opt/cosmos-framework/cosmos_framework/model/vfm ] \
+       || ln -s generator /opt/cosmos-framework/cosmos_framework/model/vfm
 
 # 1) Harness venv: mock / DROID capture (tfds via the `capture` extra).
 RUN cd /opt/cosmos-serving && uv sync --extra capture
@@ -52,9 +59,10 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 #    wheels, transformers all resolved together by vllm's own metadata) + this harness editable
 #    for the replay client. ninja in-venv so flashinfer's JIT finds it regardless of PATH.
 RUN uv venv /opt/omni/.venv --python 3.12 \
-    # cosmos-guardrail: Cosmos3's guardrail init hard-requires it (NVIDIA Open Model License)
+    # cosmos-guardrail: Cosmos3's guardrail init hard-requires it (NVIDIA Open Model License).
+    # iopath: the vendored cosmos_framework action-transform import chain needs it (pure-python).
     && uv pip install --python /opt/omni/.venv/bin/python \
-         "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail ninja \
+         "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail iopath ninja \
     && uv pip install --python /opt/omni/.venv/bin/python -e /opt/cosmos-serving \
     && py=/opt/omni/.venv/bin/python \
     # import smoke: a missing dep fails the BUILD, not a paid GPU job

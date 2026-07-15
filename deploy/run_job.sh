@@ -75,7 +75,7 @@ if [ "$BACKEND" = vllm ]; then
   PYMODEL="/opt/omni/.venv/bin/python"
   # shellcheck disable=SC1091
   . "$SERVING/deploy/versions.env"
-  uv pip install -q --python "$PYMODEL" "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail ninja
+  uv pip install -q --python "$PYMODEL" "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail iopath ninja
   uv pip install -q --python "$PYMODEL" -e "$SERVING"
   # cosmos_framework is vendored by PYTHONPATH (NOT installed): the cosmos3 pipeline lazily
   # imports its action transforms / UniPC solver / pose utils for RoboLab policy serving.
