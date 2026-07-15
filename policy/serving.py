@@ -1,18 +1,22 @@
 """Real-backend serving contract for the policy pipeline (specification_revised.txt §4
-Job 2, §9). vLLM (Reasoner, Qwen3-VL path) + vLLM-Omni (Generator / full policy).
+Job 2, §9) — STOCK vLLM-Omni (>=0.22 registers Cosmos3OmniDiffusersPipeline, the
+checkpoint's declared class; pins in deploy/versions.env, feasibility-verified on H100).
 
-This is the on-GPU wiring the mock stands in for. It is written from the serving docs and
-is NOT exercised by the mock tests — confirm every `# VERIFY` against your installed
-vLLM / vLLM-Omni before trusting a number. Two responsibilities:
+Topology note: ONE engine serves BOTH towers. The Qwen3-VL Reasoner and the diffusion
+action expert live inside the single Cosmos3 pipeline (one `vllm-omni serve` process, one
+endpoint) — "Reasoner stage" / "Generator stage" name phases WITHIN a request, not separate
+deployments. Contract verified against the vllm-omni 0.24.0 source (2026-07-15):
 
-  1. Map a Config's `stage_flags` to engine launch args (attention backend, compile,
-     CUDA graphs, conditioning cache, Cache-DiT, FP8).
-  2. Launch the server and submit a DROID request, returning the §7 per-stage timing block.
+  * Serve: `vllm-omni serve <model> [engine flags]` — technique flags are ENGINE args.
+  * Request: `POST /v1/videos/sync` multipart form — the conditioning camera frame is the
+    `input_reference` file; the Generator recipe (num_inference_steps/guidance_scale/
+    flow_shift/seed) are per-REQUEST form fields; action plumbing goes in the
+    `extra_params` JSON (action_mode="policy", domain_name="droid_lerobot",
+    action_chunk_size, robot_obs) merged into the pipeline's extra_args.
+  * Response: top-level `action` field, [chunk, dim] = [32, 8] for DROID.
+  * /v1/chat/completions only reaches the language tower (it chats; no actions).
 
-§9 compatibility rules encoded here:
-  - Flash attention via forced SDPA backend (fail, don't silently fall back).
-  - torch.compile and CUDA graphs measured without double-counting.
-  - Static/bucketed shapes required for CUDA-graph configs.
+Remaining `# VERIFY` items are named on-box checks, not guesses.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 
 from policy.configs import GENERATOR_SAMPLING, REASONER_SAMPLING, Config
@@ -48,46 +53,42 @@ def reasoner_sampling_params() -> dict:
 
 
 def engine_args(config: Config) -> list[str]:
-    """Config -> vLLM-Omni serve flags. VERIFY every flag name against the serve CLI."""
+    """Config -> vLLM-Omni ENGINE flags (serve-time). The Generator sampling recipe is NOT
+    here — it is per-request form fields (request_form_fields below), per the 0.24 API."""
     flags = config.stage_flags
-    args: list[str] = ["--model", DEFAULT_MODEL, "--max-num-seqs", "1"]  # batch size 1 (§6)
+    args: list[str] = ["--max-num-seqs", "1"]        # batch size 1 (§6); model is positional
 
-    # Attention backend. Force it explicitly; do NOT silently fall back (§9). The eager path
-    # uses torch SDPA with a forced backend (see sdpa_attention() below).
+    # Attention backend for the DIFFUSION tower, per-role dot-notation (vllm-omni docs form).
+    # Force it explicitly; do NOT silently fall back (§9).
     if flags.get("attention") == "flash":
-        args += ["--attention-backend", "FLASH_ATTN"]   # VERIFY: flag + accepted value
+        args += ["--diffusion-attention-config.per_role.self.backend", "FLASH_ATTN"]
     else:
-        args += ["--attention-backend", "TORCH_SDPA"]   # forced math SDPA baseline (§9 compare)
+        args += ["--diffusion-attention-config.per_role.self.backend", "TORCH_SDPA"]  # VERIFY value
 
-    # torch.compile / CUDA graphs. Kept distinct so they are not double-counted (§9):
-    #   compile without graphs  vs  compile with graphs (reduce-overhead).
+    # torch.compile / CUDA graphs (vanilla vLLM engine flags — real). Kept distinct so they
+    # are not double-counted (§9): compile without graphs vs compile with graphs.
     if flags.get("cuda_graphs"):
-        # If reduce-overhead auto-enables graph replay, treat as the combined config (§9).
-        args += ["--compilation-config", '{"mode":"reduce-overhead"}']  # VERIFY schema
+        args += ["--compilation-config", '{"mode":"reduce-overhead"}']  # VERIFY schema on 0.24
     elif flags.get("compile"):
         args += ["--compilation-config", '{"mode":"default"}']          # compile, no graphs
     else:
         args += ["--enforce-eager"]
 
-    # Reasoner conditioning cache (P3/E4): compute conditioning once/observation (§3).
+    # Reasoner conditioning cache (E4): NOT a stock flag — within-request K/V caching is
+    # built in; the CROSS-request conditioning cache is our patch (worth it for THIS workload:
+    # the replay set cycles 50 observations x10, so consecutive requests do share instructions).
+    # Until the patch exists, E4 measures identical to E3 on this backend — flagged, not silent.
     if flags.get("reasoner_cache"):
-        args += ["--policy-conditioning-cache", "true"]                 # VERIFY flag
+        warnings.warn(f"{config.cid}: cross-request conditioning cache requires our "
+                      "vllm-omni patch; serving stock (E4 == E3 on this backend)", stacklevel=2)
 
-    # Cache-DiT (lossy).
+    # Cache-DiT (lossy) — real backend (vllm_omni/diffusion/cache/cache_dit_backend.py).
     if flags.get("cache_dit"):
-        args += ["--cache-backend", "cache_dit"]                        # VERIFY flag
+        args += ["--cache-backend", "cache_dit"]     # VERIFY flag spelling vs DIFFUSION_CACHE_BACKEND env
 
     # Dynamic FP8 (lossy).
     if flags.get("quantization") == "fp8":
-        args += ["--quantization", "fp8"]                               # VERIFY flag
-
-    # Generator sampling recipe — model-level, identical across every rung so the technique
-    # (not a changed schedule) explains the delta. steps=4, guidance=3, shift=5, CFG Null.
-    s = GENERATOR_SAMPLING
-    args += ["--num-inference-steps", str(s.steps)]                     # VERIFY flag name
-    args += ["--guidance-scale", str(s.guidance)]                      # VERIFY flag name
-    args += ["--flow-shift", str(s.shift)]                             # VERIFY flag name
-    args += ["--cfg-mode", s.cfg_mode]                                 # VERIFY flag + accepted value
+        args += ["--quantization", "fp8"]            # VERIFY applies to the diffusion tower on 0.24
 
     # GPU-op traces. VERIFIED against vllm 0.19.1 + vllm-omni 0.20.0 source (2026-07-15): the
     # VLLM_TORCH_PROFILER_DIR env var was REMOVED from vLLM — profiling is enabled via the
@@ -101,18 +102,32 @@ def engine_args(config: Config) -> list[str]:
         args += ["--profiler-config",
                  json.dumps({"profiler": "torch", "torch_profiler_dir": profiler_dir})]
 
-    # Multi-GPU (jobs/job2b, §5.3.3): tensor-parallel across N GPUs + the parallel strategy —
-    # CFG-Parallel dispatches the cond/uncond forwards to separate ranks; Ulysses shards the
-    # sequence. Driven by env so a job sets it without touching the config matrix.
+    # Multi-GPU (jobs/job2b, §5.3.3) — vllm-omni's names (Omni ctor: cfg_parallel_size,
+    # ulysses_degree). Driven by env so a job sets it without touching the config matrix.
     tp = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
     if tp > 1:
-        args += ["--tensor-parallel-size", str(tp)]                    # VERIFY flag
         parallel = os.environ.get("PARALLEL", "cfg")                  # cfg | ulysses
         if parallel == "cfg":
-            args += ["--cfg-parallel", "true"]                        # VERIFY flag (CFG-Parallel)
+            args += ["--cfg-parallel-size", str(tp)]                  # VERIFY CLI form of cfg_parallel_size
         elif parallel == "ulysses":
-            args += ["--context-parallel", "ulysses"]                 # VERIFY flag (Ulysses CP)
+            args += ["--ulysses-degree", str(tp)]                     # VERIFY CLI form of ulysses_degree
+        else:
+            args += ["--tensor-parallel-size", str(tp)]
     return args
+
+
+def request_form_fields(seed: int) -> dict[str, str]:
+    """Per-REQUEST Generator recipe (steps=4, guidance=3, shift=5) + fixed seed — identical
+    across every rung so the technique (not a changed schedule) explains the delta (§9/§10).
+    These are /v1/videos form fields on 0.24, NOT serve flags. cfg_mode has no form field —
+    CFG Null semantics live in the checkpoint's pipeline config (VERIFY on-box)."""
+    s = GENERATOR_SAMPLING
+    return {
+        "num_inference_steps": str(s.steps),
+        "guidance_scale": str(s.guidance),
+        "flow_shift": str(s.shift),
+        "seed": str(seed),
+    }
 
 
 def start_profile(endpoint: str) -> None:
@@ -165,8 +180,8 @@ class ServerHandle:
 # `--omni` flag (its `serve --omni` usage string is stale docs), so `vllm serve --omni` dies at
 # argparse. engine_args() already carries --model and the per-config technique flags.
 SERVE_CMD = ("vllm-omni", "serve")
-HEALTH_ROUTE = "/health"                         # VERIFY readiness route
-INFER_ROUTE = "/v1/policy/infer"                 # VERIFY inference route
+HEALTH_ROUTE = "/health"                         # verified (feasibility S3)
+INFER_ROUTE = "/v1/videos/sync"                  # verified route; policy mode via extra_params
 
 
 def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
@@ -176,7 +191,7 @@ def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
     VERIFY on-box: the serve entrypoint (SERVE_CMD), that every engine_args() flag is accepted,
     the static-shape / bucketing config the CUDA-graph rungs need (§9), and the readiness route.
     """
-    cmd = [*SERVE_CMD, *engine_args(config), "--host", host, "--port", str(port)]
+    cmd = [*SERVE_CMD, model, *engine_args(config), "--host", host, "--port", str(port)]
     proc = subprocess.Popen(cmd)                 # inherits stdout/stderr -> job logs
     base_url = f"http://{host}:{port}"
     health = base_url + HEALTH_ROUTE
@@ -196,70 +211,81 @@ def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
     raise TimeoutError(f"policy server not ready within {ready_timeout_s:.0f}s at {health}")
 
 
-def _encode_image(arr) -> dict:
-    """Compact on-wire image: base64 of the raw uint8 bytes + shape/dtype (NOT a nested int
-    list — a 180x320x3 frame is ~170k ints in JSON). VERIFY the endpoint expects this shape."""
-    return {"b64": base64.b64encode(arr.tobytes()).decode("ascii"),
-            "shape": [int(x) for x in arr.shape], "dtype": str(arr.dtype)}
+def _png(arr) -> bytes:
+    """uint8 HWC array -> PNG bytes (PIL ships with vllm's dep tree)."""
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, "PNG")
+    return buf.getvalue()
 
 
-def build_request_payload(req, model: str) -> dict:
-    """Build the on-wire payload for one DROID observation from its REAL captured tensors.
+def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
+    """One DROID observation -> (/v1/videos form fields, input_reference PNG bytes).
 
-    Materializes the two camera views + 8-D proprio + instruction from `req.capture_ref`
-    (a policy/capture.py .npz) and attaches the fixed Reasoner conditioning SamplingParams.
-    The Generator recipe is baked into the server via engine_args(), so it is not repeated
-    here. VERIFY the field names / image encoding against your deployed endpoint's schema."""
+    The exterior camera frame is the input_reference file; instruction + Generator recipe
+    are plain form fields; the action plumbing + full robot observation travel in
+    extra_params (merged into the pipeline's extra_args — the same dict the OpenPI
+    websocket path fills). VERIFY on-box: the robot_obs key structure expected by
+    cosmos3's observation preprocessing (wrist camera + 8-D proprio names)."""
     from policy.capture import load_capture
 
     obs = load_capture(req.capture_ref)             # real DROID observation (exterior/wrist/proprio)
-    return {
+    fields = {
         "model": model,
-        "images": {                                 # base64(uint8 bytes) + shape (VERIFY schema)
-            "exterior": _encode_image(obs["exterior"]),
-            "wrist": _encode_image(obs["wrist"]),
-        },
-        "proprio": [float(x) for x in obs["proprio"]],   # 8-D joint(7)+gripper(1)
-        "prompt": obs["instruction"],
-        "sampling": reasoner_sampling_params(),     # conditioning decode params (fixed, §10)
-        "seed": req.seed,                           # fixed inference seed (reproducibility, §10)
+        "prompt": str(obs["instruction"]),
+        **request_form_fields(req.seed),            # steps/guidance/shift/seed (fixed, §10)
+        "extra_params": json.dumps({
+            "action_mode": "policy",
+            "domain_name": "droid_lerobot",         # -> domain_id 8 (EMBODIMENT_TO_DOMAIN_ID)
+            "action_chunk_size": 32,
+            "robot_obs": {                          # VERIFY key names against cosmos3 preprocessing
+                "proprio": [float(x) for x in obs["proprio"]],   # 8-D joint(7)+gripper(1)
+                "wrist_image": base64.b64encode(_png(obs["wrist"])).decode("ascii"),
+                "prompt": str(obs["instruction"]),
+            },
+        }),
     }
+    return fields, _png(obs["exterior"])
 
 
-# §7 per-stage keys the server must return under `latency_ms` (CUDA-event timers).
-_REQUIRED_STAGE_KEYS = ("preprocess", "h2d", "reasoner", "generator_prepare",
-                        "denoising", "postprocess", "d2h")
+def _multipart(fields: dict[str, str], file_field: str, filename: str,
+               file_bytes: bytes) -> tuple[bytes, str]:
+    import uuid
+    boundary = uuid.uuid4().hex
+    body = b""
+    for k, v in fields.items():
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f"name=\"{k}\"\r\n\r\n{v}\r\n").encode()
+    body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+             f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n").encode()
+    body += file_bytes + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
 
 
 def submit_policy_request(endpoint: str, model: str, req, config: Config) -> dict:
-    """POST one DROID observation, return the §7 per-stage timing block.
+    """POST one DROID observation to /v1/videos/sync (multipart), return the response body.
 
-    The payload (build_request_payload) carries the real captured observation + the Reasoner
-    conditioning decode params; the Generator recipe is baked into the server via engine_args()
-    — both fixed across the replay set.
-
-    VERIFY on-box: the inference route (INFER_ROUTE) + payload schema, the action-chunk response
-    shape (32x8), and that the server returns CUDA-event stage timers under `latency_ms`
-    (preprocess/h2d/reasoner/generator_prepare/denoising/postprocess/d2h) plus `server_ms`.
-    """
-    payload = build_request_payload(req, model)
-    data = json.dumps(payload).encode("utf-8")
+    Contract (verified against the 0.24.0 source): success carries a top-level `action`
+    (or `actions`) field — [32, 8] for DROID. Stock vllm-omni does NOT return our §7
+    per-stage `latency_ms` block; the caller (pipeline.VLLMPolicyEngine.run_request) uses
+    client-side wall time for total_chunk_ms and leaves absent stages at 0.0 — per-stage
+    attribution on this backend comes from the profiler traces (capture_profile), or from
+    a timing patch if we add one. Fail loudly if no action comes back."""
+    fields, frame = build_request_parts(req, model)
+    body, content_type = _multipart(fields, "input_reference", "exterior.png", frame)
     url = endpoint.rstrip("/") + INFER_ROUTE
     request = urllib.request.Request(
-        url, data=data, method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"})
+        url, data=body, method="POST",
+        headers={"Content-Type": content_type, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=120) as resp:   # VERIFY server-side budget
-            body = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(request, timeout=600) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"policy endpoint {url} returned {e.code}: {e.read()[:500]!r}") from e
+        raise RuntimeError(f"policy endpoint {url} returned {e.code}: {e.read()[:800]!r}") from e
 
-    # The client (policy/pipeline.py VLLMPolicyEngine.run_request) reads server_ms + a latency_ms
-    # block with every stage key; fail loudly if the contract is not met rather than mis-timing.
-    latency = body.get("latency_ms")
-    if "server_ms" not in body or not isinstance(latency, dict):
-        raise KeyError(f"policy response missing server_ms/latency_ms; got keys {sorted(body)}")
-    missing = [k for k in _REQUIRED_STAGE_KEYS if k not in latency]
-    if missing:
-        raise KeyError(f"policy response latency_ms missing stages {missing}; got {sorted(latency)}")
-    return body
+    action = out.get("action", out.get("actions"))
+    if action is None:
+        raise KeyError(f"policy response has no action field; got keys {sorted(out)}")
+    return out

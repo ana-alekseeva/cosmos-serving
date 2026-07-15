@@ -25,9 +25,10 @@ from policy.pytorch_engine import PyTorchPolicyEngine
 class VLLMPolicyEngine:
     """Real backend: replay each DROID request against the deployed policy endpoint.
 
-    Reasoner served by vLLM (Qwen3-VL path), Generator/full policy by vLLM-Omni. The
-    endpoint returns server-side per-stage timers (CUDA events); the client adds transport.
-    Written from the serving contract — confirm every `# VERIFY` before trusting numbers.
+    ONE vllm-omni engine serves both towers (the Qwen3-VL Reasoner and the diffusion action
+    expert live inside the stock Cosmos3OmniDiffusersPipeline) — "Reasoner/Generator" name
+    phases within a request, not separate deployments. Timing is client-measured
+    total_chunk_ms; per-stage attribution comes from profiler traces (capture_profile).
     """
 
     backend = "vllm"
@@ -64,26 +65,37 @@ class VLLMPolicyEngine:
         self.endpoint = self._server.base_url
 
     def run_request(self, req: DroidRequest) -> LatencyRecord:
+        import hashlib
+        import json
         import time
 
-        from policy.serving import submit_policy_request  # VERIFY: request/response schema
+        from policy.serving import submit_policy_request
         t0 = time.perf_counter()
         resp = submit_policy_request(self.endpoint, self.model, req, self.config)
-        transport_ms = (time.perf_counter() - t0) * 1e3 - resp["server_ms"]
-        t = resp["latency_ms"]              # VERIFY: server returns this per-stage block
-        steps = resp.get("denoising_step_ms", [])
-        server = resp["server_ms"]
+        total_ms = (time.perf_counter() - t0) * 1e3
+        # Stock vllm-omni returns the action but NOT our §7 per-stage timing block: the
+        # E-ladder's authoritative number on this backend is client-measured total_chunk_ms
+        # (batch-1, localhost — transport is noise-level); per-stage attribution comes from
+        # the profiler traces (capture_profile) or the native P-ladder (aggregate.py already
+        # falls back). Any latency_ms/server_ms the server DOES return is used as-is.
+        t = resp.get("latency_ms") or {}
+        server = resp.get("server_ms", total_ms)
+        action = resp.get("action", resp.get("actions"))
+        checksum = hashlib.sha256(json.dumps(action).encode()).hexdigest()[:16]
         gate = resp.get("quality_gate", "passed" if not self.config.lossy else "n/a")
         return LatencyRecord(
             request_id=req.request_id, task=req.task, episode_id=req.episode_id,
-            preprocess_ms=t["preprocess"], h2d_ms=t["h2d"], reasoner_ms=t["reasoner"],
-            generator_prepare_ms=t["generator_prepare"], denoising_ms=t["denoising"],
-            denoising_step_ms=steps, postprocess_ms=t["postprocess"], d2h_ms=t["d2h"],
-            server_ms=server, transport_ms=max(0.0, transport_ms),
-            first_action_ms=resp.get("first_action_ms", server + max(0.0, transport_ms)),
-            total_chunk_ms=server + max(0.0, transport_ms),
+            preprocess_ms=t.get("preprocess", 0.0), h2d_ms=t.get("h2d", 0.0),
+            reasoner_ms=t.get("reasoner", 0.0),
+            generator_prepare_ms=t.get("generator_prepare", 0.0),
+            denoising_ms=t.get("denoising", 0.0),
+            denoising_step_ms=resp.get("denoising_step_ms", []),
+            postprocess_ms=t.get("postprocess", 0.0), d2h_ms=t.get("d2h", 0.0),
+            server_ms=server, transport_ms=max(0.0, total_ms - server),
+            first_action_ms=resp.get("first_action_ms", total_ms),
+            total_chunk_ms=total_ms,
             peak_memory_mb=resp.get("peak_memory_mb", 0.0),
-            output_checksum=resp.get("output_checksum", ""), quality_gate=gate,
+            output_checksum=resp.get("output_checksum", checksum), quality_gate=gate,
         )
 
     def capture_profile(self, req: DroidRequest) -> None:
