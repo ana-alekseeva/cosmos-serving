@@ -7,8 +7,12 @@
 # Env (pass via `nebius ai job create --env ... / --env-secret ...`):
 #   HF_TOKEN            (secret, required)   HF login for the gated Cosmos3-Nano-Policy-DROID
 #   BACKEND=pytorch     pytorch (P->pytorch, E->vLLM) | vllm (everything on vLLM/vLLM-Omni)
-#   MODE=matrix         matrix (run_matrix.py) | multigpu (run_multigpu.py, needs >=2 GPUs)
+#   MODE=matrix         matrix (run_matrix.py) | multigpu (run_multigpu.py, needs >=2 GPUs) |
+#                       profile (torch.profiler Chrome traces ONLY -> ${OUTPUT_URI}raw/traces/,
+#                       open at https://ui.perfetto.dev; no matrix)
 #   CONFIGS=            comma-sep cids, empty = full matrix   (e.g. "E0,E6")
+#   PROFILE_CONFIGS=    space-sep cids to trace (profile mode default "P0 P1 P2 P3"); set it on a
+#                       matrix run to ALSO upload traces after the results
 #   REPLAY_N=50  REPLAY_SIZE=50  WARMUPS=5
 #   OUTPUT_DIR=results
 #   OUTPUT_URI=  AWS_ENDPOINT_URL=   optional S3 upload (needs AWS_* creds in env too)
@@ -182,6 +186,15 @@ python -m policy.capture --n "$REPLAY_N" --out /local/replay
 # shellcheck disable=SC1091
 source "$FRAMEWORK/.venv/bin/activate"
 
+# MODE=profile: Perfetto/Chrome traces only — profile_and_upload.sh runs policy.profile_pytorch
+# per config (1 traced request after warmups) and uploads to ${OUTPUT_URI}raw/traces/.
+if [ "$MODE" = profile ]; then
+  command -v aws >/dev/null 2>&1 || uv pip install -q awscli
+  PROFILE_CONFIGS="${PROFILE_CONFIGS:-P0 P1 P2 P3}" bash deploy/profile_and_upload.sh /local/replay/manifest.json
+  echo "DONE (profile) -> ${OUTPUT_URI:-none}raw/traces/"
+  exit 0
+fi
+
 cfg=(); [ -n "$CONFIGS" ] && cfg=(--configurations "$CONFIGS")
 if [ "$MODE" = multigpu ]; then
   python run_multigpu.py --backend "$BACKEND" --manifest /local/replay/manifest.json --out-dir "$OUTPUT_DIR"
@@ -198,5 +211,10 @@ if [ -n "${OUTPUT_URI:-}" ]; then
   ep=(); [ -n "${AWS_ENDPOINT_URL:-}" ] && ep=(--endpoint-url "$AWS_ENDPOINT_URL")
   aws s3 cp "$OUTPUT_DIR/" "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" "${ep[@]}" || true
   aws s3 cp "$OUTPUT_DIR/aggregate/" "${OUTPUT_URI}" --recursive "${ep[@]}" || true
+fi
+# Optional Perfetto traces alongside a matrix run (e.g. PROFILE_CONFIGS="P0 P3").
+if [ -n "${PROFILE_CONFIGS:-}" ]; then
+  command -v aws >/dev/null 2>&1 || uv pip install -q awscli
+  bash deploy/profile_and_upload.sh /local/replay/manifest.json || true
 fi
 echo "DONE -> $OUTPUT_DIR (uri: ${OUTPUT_URI:-none})"
