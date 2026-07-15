@@ -32,7 +32,7 @@ fail() { echo "== FAIL $* — see $WORK/serve.log"; exit 1; }
 # --- S1: fresh venv, stock PyPI stack ------------------------------------------------
 command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
-uv venv "$WORK/.venv" --python 3.12 || fail S1 venv
+uv venv --clear "$WORK/.venv" --python 3.12 || fail S1 venv   # idempotent reruns (uv cache keeps reinstalls fast)
 PY="$WORK/.venv/bin/python"
 uv pip install --python "$PY" -q "vllm==$VLLM_PIN" "vllm-omni==$OMNI_PIN" || fail S1 install
 "$PY" - <<'EOF' || fail S1 versions
