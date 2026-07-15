@@ -1,10 +1,10 @@
 """Figures (specification_revised.txt §2 required outputs 2-4, §3).
 
-  plot_waterfall          Native PyTorch (P0-P3) / end-to-end (E0-E6)
+  plot_waterfall          Native PyTorch (P0-P3) / end-to-end (E0-E4)
                           contribution waterfalls — descending staircase, marginal %
                           drop per rung, 95% bootstrap CI whiskers.
   plot_stage_breakdown    Baseline vs final stacked stage composition (the six §3 stages).
-  plot_quality_comparison Lossy Cache-DiT/FP8 rungs — speedup + gate verdict + drift.
+  plot_quality_comparison Lossy FP8 rung — speedup + gate verdict + drift.
 
 Style mirrors the repo's prior figures (Agg backend, sequential blue palette, dpi=150).
 """
@@ -67,8 +67,10 @@ def plot_waterfall(data: dict, out_path: str | Path, title: str | None = None) -
                     (len(rungs) - 1, p50[-1]), textcoords="offset points", xytext=(0, 24),
                     ha="center", fontsize=9, color=COLOR_BAR, fontweight="bold")
 
-    name = {"native": "Native PyTorch (P0→P3)",
-            "end_to_end": "End-to-end cumulative (E0→E6)"}.get(data["waterfall"], data["waterfall"])
+    # derive the rung range from the actual data (ladder length is not fixed)
+    span = f"{rungs[0]['cid']}→{rungs[-1]['cid']}" if rungs else ""
+    name = {"native": f"Native PyTorch ({span})",
+            "end_to_end": f"End-to-end cumulative ({span})"}.get(data["waterfall"], data["waterfall"])
     ax.set_title(title or f"Cosmos3-Nano-Policy-DROID — {name} latency waterfall", fontsize=12)
     ax.set_ylabel(data["metric_label"])
     ax.set_xticks(list(x))
@@ -132,7 +134,7 @@ def plot_quality_comparison(data: dict, out_path: str | Path, title: str | None 
     ax.set_xticks(list(xs))
     ax.set_xticklabels([f"{r['cid']}\n{r['label'].replace('+ ', '')}" for r in rows], fontsize=8)
     ax.set_ylabel("chunk-latency speedup vs baseline (×)")
-    ax.set_title(title or "Lossy-technique quality gate (Cache-DiT / FP8)", fontsize=12)
+    ax.set_title(title or "Lossy-technique quality gate (FP8)", fontsize=12)
     handles = [plt.Rectangle((0, 0), 1, 1, color=COLOR_BAR),
                plt.Rectangle((0, 0), 1, 1, color=COLOR_FAIL)]
     ax.legend(handles, ["gate passed", "gate failed"], fontsize=9, frameon=False)

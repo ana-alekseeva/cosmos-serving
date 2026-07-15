@@ -10,9 +10,9 @@ Consumes the matrix results dir (per-config JSONL) plus the job's profiler trace
                               with_stack flamegraph (stacks_cuda_rank0.txt)
   kernel_composition.png/.csv GEMM / attention / fused / elementwise / memory shares
                               per rung, from the Chrome trace kernel events
-  pareto_latency_vram.png     p50 latency vs peak VRAM per rung (E3-vs-E6 optima)
+  pareto_latency_vram.png     p50 latency vs peak VRAM per rung (E4 = joint optimum)
   latency_ecdf.png            per-request latency ECDFs with p50/p99 markers
-  denoise_steps.png           per-denoise-step latency, rung vs rung (Cache-DiT story)
+  denoise_steps.png           per-denoise-step latency, eager baseline vs final rung
   request_timeline.png        latency vs request index (drift/bias-control evidence)
 
     python analyze_traces.py --results-dir results --traces results/traces.tar.gz
@@ -35,10 +35,10 @@ import typer
 # Validated categorical palette (dataviz six-checks, light surface; contrast WARNs on
 # slots 2/3 are relieved by direct % labels + the CSV emitted next to every figure).
 CAT = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948"]
-# Ordered blue ramp for the ordinal rungs E0..E6 (lines start at step 250 for contrast).
+# Ordered blue ramp for the ordinal rungs E0..E4 (lines start at step 250 for contrast).
 RAMP = ["#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 GRID = "#d9d9d9"
-E_ORDER = ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
+E_ORDER = ["E0", "E1", "E2", "E3", "E4"]
 
 # --- model-part attribution (leaf-first, first match wins) -------------------------
 # Patterns written against the OBSERVED python_function frame vocabulary in the Job 2
@@ -374,9 +374,9 @@ def main(
     ax.legend(fontsize=8, frameon=False, ncol=len(cids))
     _save(fig, out / "request_timeline.png")
 
-    # --- denoise-step comparison (Cache-DiT story) ----------------------------------
+    # --- denoise-step comparison: eager baseline vs final (each of the 4 steps faster) --
     step_cfgs = [c for c in cids if any(r.get("denoising_step_ms") for r in records[c])]
-    pair = [c for c in ("E3", "E5") if c in step_cfgs] or step_cfgs[:2]
+    pair = [c for c in (cids[0], cids[-1]) if c in step_cfgs] or step_cfgs[:2]
     if len(pair) == 2:
         fig, ax = plt.subplots(figsize=(7.5, 5))
         ax.set_axisbelow(True)
@@ -393,8 +393,7 @@ def main(
                 ax.annotate(f"{v:.0f}", (x, v), ha="center", va="bottom", fontsize=8)
         ax.set_xticks(range(n), [f"step {k + 1}" for k in range(n)])
         ax.set_ylabel("median step latency (ms)")
-        ax.set_title(f"Denoising step latency: {pair[0]} vs {pair[1]} "
-                     "(no step gets cheaper ⇒ cache never activates)")
+        ax.set_title(f"Per-denoising-step latency: {pair[0]} (eager) vs {pair[1]} (final)")
         ax.legend(fontsize=9, frameon=False)
         _save(fig, out / "denoise_steps.png")
 

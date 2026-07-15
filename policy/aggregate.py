@@ -3,7 +3,7 @@
 A small CPU job that merges every per-configuration subprocess output and generates:
 
   * CSV (+ Parquet if pandas/pyarrow present) per-configuration summaries
-  * Waterfall data — native PyTorch (P0-P3), end-to-end vLLM (E0-E6),
+  * Waterfall data — native PyTorch (P0-P3), end-to-end vLLM (E0-E4),
     each with cumulative (vs baseline) and marginal (vs prev) speedups
   * Confidence intervals (numpy bootstrap over the raw per-request samples)
   * Stage breakdown for baseline and final (the six §3 stages)
@@ -140,7 +140,7 @@ def build_waterfall(results: dict[str, ConfigResult], waterfall: str) -> dict:
 
 
 def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
-    """Baseline vs final per-stage p50 — the §3 stage breakdown. Prefers the E ladder (E0 vs E6);
+    """Baseline vs final per-stage p50 — the §3 stage breakdown. Prefers the E ladder (E0 vs final);
     a native-only run (P configs, e.g. Job 1) falls back to the P ladder instead of emitting {}."""
     rungs = next((r for r in ([c for c in ladder(wf) if c.cid in results] for wf in (END_TO_END, NATIVE)) if r), None)
     if not rungs:
