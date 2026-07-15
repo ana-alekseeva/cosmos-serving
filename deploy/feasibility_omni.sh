@@ -37,7 +37,9 @@ command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv venv --clear "$WORK/.venv" --python 3.12 || fail S1 venv   # idempotent reruns (uv cache keeps reinstalls fast)
 PY="$WORK/.venv/bin/python"
-uv pip install --python "$PY" -q "vllm==$VLLM_PIN" "vllm-omni==$OMNI_PIN" || fail S1 install
+# cosmos-guardrail: Cosmos3's guardrail init hard-requires it (NVIDIA Open Model License) —
+# without it the omni orchestrator dies at startup.
+uv pip install --python "$PY" -q "vllm==$VLLM_PIN" "vllm-omni==$OMNI_PIN" cosmos-guardrail || fail S1 install
 "$PY" - <<'EOF' || fail S1 versions
 from importlib.metadata import version
 for p in ("vllm", "vllm-omni", "torch", "transformers", "diffusers"):

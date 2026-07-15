@@ -52,8 +52,9 @@ RUN cd /opt/cosmos-serving && uv sync --extra capture
 #    wheels, transformers all resolved together by vllm's own metadata) + this harness editable
 #    for the replay client. ninja in-venv so flashinfer's JIT finds it regardless of PATH.
 RUN uv venv /opt/omni/.venv --python 3.12 \
+    # cosmos-guardrail: Cosmos3's guardrail init hard-requires it (NVIDIA Open Model License)
     && uv pip install --python /opt/omni/.venv/bin/python \
-         "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" ninja \
+         "vllm==${VLLM_PIN}" "vllm-omni==${OMNI_PIN}" cosmos-guardrail ninja \
     && uv pip install --python /opt/omni/.venv/bin/python -e /opt/cosmos-serving \
     && py=/opt/omni/.venv/bin/python \
     # import smoke: a missing dep fails the BUILD, not a paid GPU job
