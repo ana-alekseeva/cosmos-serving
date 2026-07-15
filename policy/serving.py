@@ -182,7 +182,10 @@ class ServerHandle:
 SERVE_CMD = ("vllm-omni", "serve")
 OMNI_FLAG = "--omni"
 HEALTH_ROUTE = "/health"                         # verified (feasibility S3)
-INFER_ROUTE = "/v1/videos/sync"                  # verified route; policy mode via extra_params
+# ASYNC videos route: the sync variant returns raw mp4 bytes and DISCARDS the action; the
+# async job record carries action + stage_durations + inference_time_s + peak_memory_mb.
+INFER_ROUTE = "/v1/videos"
+POLL_INTERVAL_S = 0.025                          # bounded client-side noise on total_chunk_ms
 
 
 def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
@@ -268,15 +271,16 @@ def _multipart(fields: dict[str, str], file_field: str, filename: str,
     return body, f"multipart/form-data; boundary={boundary}"
 
 
-def submit_policy_request(endpoint: str, model: str, req, config: Config) -> dict:
-    """POST one DROID observation to /v1/videos/sync (multipart), return the response body.
+def submit_policy_request(endpoint: str, model: str, req, config: Config,
+                          *, timeout_s: float = 600.0) -> dict:
+    """One DROID observation -> action chunk via the ASYNC videos API (multipart POST
+    /v1/videos, then poll GET /v1/videos/{id} until completed).
 
-    Contract (verified against the 0.24.0 source): success carries a top-level `action`
-    (or `actions`) field — [32, 8] for DROID. Stock vllm-omni does NOT return our §7
-    per-stage `latency_ms` block; the caller (pipeline.VLLMPolicyEngine.run_request) uses
-    client-side wall time for total_chunk_ms and leaves absent stages at 0.0 — per-stage
-    attribution on this backend comes from the profiler traces (capture_profile), or from
-    a timing patch if we add one. Fail loudly if no action comes back."""
+    The completed job record (verified against the 0.24.0 source) carries `action`
+    ([32, 8] for DROID), `stage_durations` (SERVER-side per-stage timing), `inference_time_s`
+    and `peak_memory_mb` — the caller maps those into the LatencyRecord. Polling adds at most
+    POLL_INTERVAL_S of client-side noise to wall time; `inference_time_s` is authoritative
+    for the server. Fail loudly if no action comes back."""
     fields, frame = build_request_parts(req, model)
     body, content_type = _multipart(fields, "input_reference", "exterior.png", frame)
     url = endpoint.rstrip("/") + INFER_ROUTE
@@ -284,12 +288,27 @@ def submit_policy_request(endpoint: str, model: str, req, config: Config) -> dic
         url, data=body, method="POST",
         headers={"Content-Type": content_type, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=600) as resp:
-            out = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(request, timeout=120) as resp:
+            ref = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"policy endpoint {url} returned {e.code}: {e.read()[:800]!r}") from e
 
-    action = out.get("action", out.get("actions"))
+    job_url = f"{url}/{ref['id']}"
+    deadline = time.monotonic() + timeout_s
+    job: dict = ref
+    while time.monotonic() < deadline:
+        with urllib.request.urlopen(job_url, timeout=30) as resp:
+            job = json.loads(resp.read().decode("utf-8"))
+        status = str(job.get("status", "")).lower()
+        if "completed" in status:
+            break
+        if "failed" in status:
+            raise RuntimeError(f"policy job {ref['id']} failed: {job.get('error')}")
+        time.sleep(POLL_INTERVAL_S)
+    else:
+        raise TimeoutError(f"policy job {ref['id']} not completed within {timeout_s:.0f}s")
+
+    action = job.get("action", job.get("actions"))
     if action is None:
-        raise KeyError(f"policy response has no action field; got keys {sorted(out)}")
-    return out
+        raise KeyError(f"completed policy job has no action; got keys {sorted(job)}")
+    return job

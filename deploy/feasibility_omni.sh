@@ -137,12 +137,28 @@ for k, v in fields.items():
 body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"input_reference\"; "
          f"filename=\"frame.png\"\r\nContent-Type: image/png\r\n\r\n").encode()
 body += buf.getvalue() + f"\r\n--{boundary}--\r\n".encode()
+# ASYNC route: /v1/videos/sync returns raw mp4 bytes and DISCARDS the action; the async
+# job record is where action + stage_durations + inference_time_s live as JSON.
+import time as _t
 req = urllib.request.Request(
-    "http://127.0.0.1:$PORT/v1/videos/sync", body, method="POST",
+    "http://127.0.0.1:$PORT/v1/videos", body, method="POST",
     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
 try:
-    resp = json.loads(urllib.request.urlopen(req, timeout=600).read().decode())
-    action = resp.get("action") or resp.get("actions")
+    ref = json.loads(urllib.request.urlopen(req, timeout=120).read().decode())
+    vid = ref["id"]
+    print("S5 job:", vid)
+    deadline = _t.time() + 600
+    while _t.time() < deadline:
+        job = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:$PORT/v1/videos/{vid}", timeout=30).read().decode())
+        status = str(job.get("status", "")).lower()
+        if "completed" in status or "failed" in status:
+            break
+        _t.sleep(0.5)
+    print("S5 status:", status, "| inference_time_s:", job.get("inference_time_s"),
+          "| stage_durations:", json.dumps(job.get("stage_durations"))[:400],
+          "| peak_memory_mb:", job.get("peak_memory_mb"))
+    action = job.get("action") or job.get("actions")
     if action is not None:
         import numpy as np
         shape = np.asarray(action).shape
@@ -150,8 +166,7 @@ try:
         assert tuple(shape)[-2:] == (32, 8), f"expected [...,32,8], got {shape}"
         print("S5 PASS: action chunk [32, 8] returned")
     else:
-        print("S5 no action field; top-level keys:", sorted(resp))
-        print(json.dumps(resp)[:2000])
+        print("S5 no action; job record keys:", sorted(job), "| error:", job.get("error"))
 except Exception as e:
     print("S5 request failed:", e, getattr(e, "read", lambda: b"")()[:2000])
 EOF
