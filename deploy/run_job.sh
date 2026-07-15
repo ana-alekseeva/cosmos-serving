@@ -270,9 +270,13 @@ if [ -n "${OUTPUT_URI:-}" ]; then
   ep=(); [ -n "${AWS_ENDPOINT_URL:-}" ] && ep=(--endpoint-url "$AWS_ENDPOINT_URL")
   aws s3 cp "$OUTPUT_DIR/" "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" "${ep[@]}" || true
   aws s3 cp "$OUTPUT_DIR/aggregate/" "${OUTPUT_URI}" --recursive "${ep[@]}" || true
-  # vLLM server-side profiler traces, if any were flushed (needs /start_profile wiring).
-  [ -n "${VLLM_TORCH_PROFILER_DIR:-}" ] && [ -n "$(ls -A "$VLLM_TORCH_PROFILER_DIR" 2>/dev/null)" ] \
-    && aws s3 cp "$VLLM_TORCH_PROFILER_DIR/" "${OUTPUT_URI}raw/traces/" --recursive "${ep[@]}" || true
+  # vLLM server-side profiler traces, if any were flushed. ONE tarball, not --recursive:
+  # the trace dirs are hundreds of small stack/xlsx/json.gz files and per-file S3 round
+  # trips dominate the upload time (extract with: tar xzf traces.tar.gz).
+  if [ -n "${VLLM_TORCH_PROFILER_DIR:-}" ] && [ -n "$(ls -A "$VLLM_TORCH_PROFILER_DIR" 2>/dev/null)" ]; then
+    tar czf /local/traces.tar.gz -C "$VLLM_TORCH_PROFILER_DIR" . \
+      && aws s3 cp /local/traces.tar.gz "${OUTPUT_URI}raw/traces.tar.gz" "${ep[@]}" || true
+  fi
 fi
 # Optional Perfetto traces alongside a matrix run (e.g. PROFILE_CONFIGS="P0 P3").
 if [ -n "${PROFILE_CONFIGS:-}" ]; then
