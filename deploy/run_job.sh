@@ -47,6 +47,21 @@ fi
 : "${REPLAY_N:=50}"; : "${REPLAY_SIZE:=50}"; : "${WARMUPS:=5}"; : "${OUTPUT_DIR:=results}"
 mkdir -p /local/replay /local/model
 
+# Refresh the harness to REPO_REF at job start. The image's COPY goes stale the moment
+# client code changes (burned a full matrix once), and --inject-file has a 64KB TOTAL cap
+# (KMS plaintext) that code files blow past — so the job pulls the current code itself.
+# The overlay preserves the injected .env (not in the clone); .image_commit is updated so
+# the preflight reports the commit that will actually run. On clone failure: run baked code.
+if [ -n "${REPO_URL:-}" ]; then
+  if git clone -q --depth 1 --branch "${REPO_REF:-main}" "$REPO_URL" /tmp/serving-head; then
+    git -C /tmp/serving-head rev-parse --short HEAD > /tmp/serving-head/.image_commit
+    rm -rf /tmp/serving-head/.git
+    cp -a /tmp/serving-head/. "$SERVING"/
+  else
+    echo "WARN: harness refresh from $REPO_URL failed — running the image-baked code"
+  fi
+fi
+
 MODEL="$(sed -nE 's/^[[:space:]]+model:[[:space:]]*//p' config/experiment.yaml | head -1)"
 
 # --- CUDA sanity FIRST: a broken node/cuBLAS should fail here in ~1 min, BEFORE the replay
