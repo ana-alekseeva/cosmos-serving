@@ -48,11 +48,12 @@ class VLLMPolicyEngine:
             warnings.warn(f"{self.config.cid}: {names} — {why}", stacklevel=2)
         if self.endpoint:                   # externally-deployed endpoint: nothing to launch
             return
-        # GPU-op traces (the vLLM analogue of the native path's Perfetto traces): vLLM's torch
-        # profiler flushes Chrome traces to VLLM_TORCH_PROFILER_DIR when /start_profile is hit
-        # (capture_profile below). Point it at a per-config SUBDIR so trace_E0 vs trace_E6 are
-        # attributable — safe to mutate os.environ: each config runs in its own subprocess (§4),
-        # and the server inherits the env via Popen.
+        # GPU-op traces (the vLLM analogue of the native path's Perfetto traces): serving.py
+        # turns VLLM_TORCH_PROFILER_DIR into the --profiler-config engine flag (the env var
+        # itself was removed from vllm 0.19.1); traces flush on /stop_profile (capture_profile
+        # below). Point it at a per-config SUBDIR so trace_E0 vs trace_E6 are attributable —
+        # safe to mutate os.environ: each config runs in its own subprocess (§4), and
+        # engine_args() reads it at launch time.
         base = os.environ.get("VLLM_TORCH_PROFILER_DIR")
         if base:
             os.environ["VLLM_TORCH_PROFILER_DIR"] = os.path.join(base, self.config.cid)

@@ -89,6 +89,18 @@ def engine_args(config: Config) -> list[str]:
     args += ["--flow-shift", str(s.shift)]                             # VERIFY flag name
     args += ["--cfg-mode", s.cfg_mode]                                 # VERIFY flag + accepted value
 
+    # GPU-op traces. VERIFIED against vllm 0.19.1 + vllm-omni 0.20.0 source (2026-07-15): the
+    # VLLM_TORCH_PROFILER_DIR env var was REMOVED from vLLM — profiling is enabled via the
+    # --profiler-config engine flag (vllm/config/profiler.py), and the /start_profile +
+    # /stop_profile routes are only MOUNTED when a stage's engine args carry a profiler_config
+    # with profiler set (vllm_omni api_server._should_enable_profiler_endpoints). We keep the
+    # env var as OUR job-level knob (run_job.sh sets it; pipeline.py points it at a per-config
+    # subdir before launch) and translate it to the flag here.
+    profiler_dir = os.environ.get("VLLM_TORCH_PROFILER_DIR")
+    if profiler_dir:
+        args += ["--profiler-config",
+                 json.dumps({"profiler": "torch", "torch_profiler_dir": profiler_dir})]
+
     # Multi-GPU (jobs/job2b, §5.3.3): tensor-parallel across N GPUs + the parallel strategy —
     # CFG-Parallel dispatches the cond/uncond forwards to separate ranks; Ulysses shards the
     # sequence. Driven by env so a job sets it without touching the config matrix.
@@ -104,9 +116,10 @@ def engine_args(config: Config) -> list[str]:
 
 
 def start_profile(endpoint: str) -> None:
-    """Start vLLM's server-side torch profiler (traces -> VLLM_TORCH_PROFILER_DIR on the server).
-    Set VLLM_TORCH_PROFILER_DIR in the server env before launch, then call this before the
-    measured request and stop_profile() after. VERIFY the /start_profile route on your build."""
+    """Start vLLM's server-side torch profiler (traces -> the --profiler-config
+    torch_profiler_dir; engine_args() sets it from VLLM_TORCH_PROFILER_DIR). The route only
+    exists when the server was launched with a profiler_config (verified: vllm-omni 0.20.0
+    mounts /start_profile conditionally); callers treat an HTTP error as "no trace", not fatal."""
     urllib.request.urlopen(urllib.request.Request(endpoint.rstrip("/") + "/start_profile",
                                                   method="POST"), timeout=30)
 
@@ -147,9 +160,11 @@ class ServerHandle:
             pass
 
 
-# Serve entrypoint (# VERIFY against your install: `vllm serve --omni` vs a dedicated
-# vllm-omni CLI). engine_args() already carries --model and the per-config technique flags.
-SERVE_CMD = ("vllm", "serve", "--omni")
+# Serve entrypoint — VERIFIED against the installed vllm-omni 0.20.0 (2026-07-15): the package
+# registers ONLY a `vllm-omni` console script (entry_points.txt), and vanilla vllm 0.19.1 has no
+# `--omni` flag (its `serve --omni` usage string is stale docs), so `vllm serve --omni` dies at
+# argparse. engine_args() already carries --model and the per-config technique flags.
+SERVE_CMD = ("vllm-omni", "serve")
 HEALTH_ROUTE = "/health"                         # VERIFY readiness route
 INFER_ROUTE = "/v1/policy/infer"                 # VERIFY inference route
 
