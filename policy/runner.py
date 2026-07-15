@@ -78,6 +78,16 @@ def run_configuration(
             engine.run_request(req)
         for req in requests:                            # measured pass (fixed replay set)
             records.append(engine.run_request(req))
+        # Optional GPU-op trace (Perfetto-style; vLLM's server-side torch profiler): one EXTRA
+        # profiled request AFTER the measured pass so profiler overhead never touches the
+        # records. Duck-typed — only engines that support it (VLLMPolicyEngine) define it, and
+        # a broken profiler route must not fail an otherwise-good config.
+        capture = getattr(engine, "capture_profile", None)
+        if capture is not None and records:
+            try:
+                capture(requests[0])
+            except Exception as exc:
+                print(f"[{config.cid}] capture_profile skipped: {type(exc).__name__}: {exc}")
     except Exception as exc:                            # a failed config must not kill the matrix
         error = f"{type(exc).__name__}: {exc}"[:1500]
     finally:

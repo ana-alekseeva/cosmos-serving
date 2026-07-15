@@ -40,12 +40,23 @@ class VLLMPolicyEngine:
         self._server = None
 
     def prepare(self) -> None:
+        import os
+
         compat.validate(self.config, "vllm")                 # §5.3.3: vLLM-Omni technique set
         for pair, why in compat.conflicts(self.config):      # §9: warn on non-composing pairs
             names = " + ".join(compat.TECHNIQUES[k][0] for k in pair)
             warnings.warn(f"{self.config.cid}: {names} — {why}", stacklevel=2)
         if self.endpoint:                   # externally-deployed endpoint: nothing to launch
             return
+        # GPU-op traces (the vLLM analogue of the native path's Perfetto traces): vLLM's torch
+        # profiler flushes Chrome traces to VLLM_TORCH_PROFILER_DIR when /start_profile is hit
+        # (capture_profile below). Point it at a per-config SUBDIR so trace_E0 vs trace_E6 are
+        # attributable — safe to mutate os.environ: each config runs in its own subprocess (§4),
+        # and the server inherits the env via Popen.
+        base = os.environ.get("VLLM_TORCH_PROFILER_DIR")
+        if base:
+            os.environ["VLLM_TORCH_PROFILER_DIR"] = os.path.join(base, self.config.cid)
+            os.makedirs(os.environ["VLLM_TORCH_PROFILER_DIR"], exist_ok=True)
         # VERIFY: launch vLLM-Omni with this config's engine flags (bench serving contract).
         from policy.serving import start_policy_server
         self._server = start_policy_server(self.model, self.config)
@@ -73,6 +84,22 @@ class VLLMPolicyEngine:
             peak_memory_mb=resp.get("peak_memory_mb", 0.0),
             output_checksum=resp.get("output_checksum", ""), quality_gate=gate,
         )
+
+    def capture_profile(self, req: DroidRequest) -> None:
+        """One EXTRA request under vLLM's server-side torch profiler — the GPU-op trace (Perfetto
+        dashboard) for this config. Called by the runner AFTER the measured pass, so profiler
+        overhead never contaminates the latency records. No-ops unless the server was launched
+        with VLLM_TORCH_PROFILER_DIR set (run_job.sh sets it for BACKEND=vllm)."""
+        import os
+
+        if not os.environ.get("VLLM_TORCH_PROFILER_DIR") or self.endpoint is None:
+            return
+        from policy.serving import start_profile, stop_profile
+        start_profile(self.endpoint)                  # VERIFY the /start_profile route on-box
+        try:
+            self.run_request(req)                     # traced request; record discarded
+        finally:
+            stop_profile(self.endpoint)               # server flushes the Chrome trace
 
     def close(self) -> None:
         if self._server is not None:
