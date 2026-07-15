@@ -255,9 +255,14 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
 
     obs = load_capture(req.capture_ref)             # real DROID observation (exterior/wrist/proprio)
     proprio = [float(x) for x in obs["proprio"]]    # 8-D: joint(7) + gripper(1)
+    instruction = str(obs["instruction"])
+    # FastAPI drops an EMPTY multipart form value entirely (parsed as None -> 400 "prompt
+    # Field required"; reproduced against the same Form signature). Some DROID episodes have
+    # no language annotation. The form prompt is only the video API's required field — the
+    # actual conditioning text is robot_obs["prompt"] (ai_caption), which keeps the true "".
     fields = {
         "model": model,
-        "prompt": str(obs["instruction"]),
+        "prompt": instruction if instruction.strip() else " ",
         **request_form_fields(req.seed),            # steps/guidance/shift/seed (fixed, §10)
         # server-enforced: num_frames == action_chunk_size (or +1) for action requests
         "num_frames": "32",
