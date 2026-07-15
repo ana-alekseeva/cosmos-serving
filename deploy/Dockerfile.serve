@@ -1,4 +1,4 @@
-# cosmos-droid-vllm:v4 — SERVE variant. A thin layer on the Job-2 benchmark image (v3) that
+# cosmos-droid-vllm:v5 — SERVE variant. A thin layer on the Job-2 benchmark image (v3) that
 # adds a long-lived policy-server ENTRYPOINT, so the SAME verified vLLM-Omni stack can be
 # deployed as an npa SERVERLESS endpoint that RoboLab (Job 3) and the latency harness both hit.
 # v3 already carries the full stack: vllm + vllm-omni (deploy/versions.env pins), cosmos_framework
@@ -8,8 +8,8 @@
 # Build (context = repo root; wheels are linux/x86_64 -> --platform linux/amd64). Bump the tag
 # EVERY push — a reused tag is served STALE from the k8s node image cache:
 #   REG=cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf
-#   docker build --platform linux/amd64 -f deploy/Dockerfile.serve -t $REG/cosmos-droid-vllm:v4 .
-#   docker push $REG/cosmos-droid-vllm:v4
+#   docker build --platform linux/amd64 -f deploy/Dockerfile.serve -t $REG/cosmos-droid-vllm:v5 .
+#   docker push $REG/cosmos-droid-vllm:v5
 ARG BASE=cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-vllm:v3
 FROM ${BASE}
 
@@ -22,6 +22,15 @@ RUN uv pip install --python /opt/omni/.venv/bin/python --no-cache \
       iopath omegaconf hydra-core attrs cattrs loguru tyro termcolor \
       einops msgpack obstore av imageio imageio-ffmpeg nvidia-ml-py \
     && /opt/omni/.venv/bin/python -c "from cosmos_framework.data.vfm.action.transforms import ActionTransformPipeline; print('action transforms import OK')"
+
+# Refresh the harness code baked into the base image. v3 was built from an older commit whose
+# engine_args emitted the INVALID {"mode":"reduce-overhead"} for E4 (vllm-omni 0.24 only accepts
+# NONE/STOCK_TORCH_COMPILE/DYNAMO_TRACE_ONCE/VLLM_COMPILE); current code emits VLLM_COMPILE. The
+# omni venv installed /opt/cosmos-serving editable, so overwriting these sources updates the code
+# serve_launch.py imports (policy.serving.engine_args, policy.configs, policy.config).
+COPY policy /opt/cosmos-serving/policy
+COPY config /opt/cosmos-serving/config
+RUN cd /opt/cosmos-serving && /opt/omni/.venv/bin/python -c "from policy.serving import engine_args; from policy.configs import config_by_id; a=' '.join(engine_args(config_by_id('E4'))); assert 'VLLM_COMPILE' in a and 'reduce-overhead' not in a, a; print('engine_args(E4) OK:', a)"
 
 # Serve launcher + entrypoint (small, always taken fresh from the build context).
 COPY deploy/serve_launch.py  /opt/cosmos-serving/deploy/serve_launch.py

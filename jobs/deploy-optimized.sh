@@ -10,7 +10,7 @@
 #   MODE=optimized bash jobs/deploy-optimized.sh     # CONFIG=E4 (FP8 final)   -> Job 3 candidate
 #   MODE=baseline  bash jobs/deploy-optimized.sh     # CONFIG=E0 (eager)       -> Job 3 baseline
 #
-# Serves the cosmos-droid-vllm:v4 SERVE image (deploy/Dockerfile.serve): its ENTRYPOINT runs
+# Serves the cosmos-droid-vllm:v5 SERVE image (deploy/Dockerfile.serve): its ENTRYPOINT runs
 # `vllm-omni serve --omni <engine_args(CONFIG)> --stage-overrides <policy_server_config>`, which
 # exposes BOTH /v1/videos (latency) and ws /v1/realtime/robot/openpi (RoboLab) from one process.
 set -euo pipefail
@@ -31,7 +31,7 @@ AUTH="${AUTH:-none}"                               # eval endpoints: none (RoboL
 # e00k6drmprp0pm6zcf) with a FRESH tag (never reuse tags — the cluster serves stale layers on a
 # reused tag). It is cosmos-droid-vllm:v3 (the Job-2 vLLM-Omni stack) + a policy-server ENTRYPOINT.
 # NOT npa-cosmos (that image is npa's stock Text2World video server — no vllm_omni, wrong API).
-IMAGE="${IMAGE:-cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-vllm:v4}"
+IMAGE="${IMAGE:-cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-vllm:v5}"
 : "${HF_TOKEN:?export HF_TOKEN=... (Cosmos3-Nano-Policy-DROID license accepted on HF)}"
 
 # The image ENTRYPOINT reads CONFIG and builds the full serve command via policy.serving —

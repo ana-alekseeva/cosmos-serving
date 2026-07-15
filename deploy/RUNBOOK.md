@@ -18,7 +18,7 @@ Concrete account values used below (from `~/.npa/config.yaml`):
 | Project id | `project-e00em6gppr002a5efwp7eb` |
 | npa project alias | `eu-north1` |
 | Registry | `cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf` |
-| Serve image | `cosmos-droid-vllm:v4` (built from `deploy/Dockerfile.serve`) |
+| Serve image | `cosmos-droid-vllm:v5` (built from `deploy/Dockerfile.serve`) |
 
 ---
 
@@ -46,14 +46,14 @@ OUTPUT_URI_EVAL=s3://serverless-challenge/robolab-eval-results/subset/   # Job 3
 ## 1. Build + push the serve image (once per code/stack change)
 
 `npa cosmos deploy --runtime serverless` runs the image's **own ENTRYPOINT** (it injects env vars,
-never a command), so the image must start the server itself. `cosmos-droid-vllm:v4` does that.
+never a command), so the image must start the server itself. `cosmos-droid-vllm:v5` does that.
 **Bump the tag on every push** — the k8s node serves stale layers on a reused tag.
 
 ```bash
 export HF_TOKEN=...                    # required by the base image build
 REG=cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf
-docker build --platform linux/amd64 -f deploy/Dockerfile.serve -t $REG/cosmos-droid-vllm:v4 .
-docker push $REG/cosmos-droid-vllm:v4
+docker build --platform linux/amd64 -f deploy/Dockerfile.serve -t $REG/cosmos-droid-vllm:v5 .
+docker push $REG/cosmos-droid-vllm:v5
 ```
 
 If you bump the tag (e.g. `:v5`), pass it to the deploy in Step 2 with `IMAGE=$REG/cosmos-droid-vllm:v5`.
@@ -65,7 +65,7 @@ If you bump the tag (e.g. `:v5`), pass it to the deploy in Step 2 with `IMAGE=$R
 `jobs/deploy-optimized.sh` wraps `npa workbench cosmos deploy`. `MODE` selects the config
 (`CONFIG=E0` baseline eager / `CONFIG=E4` FP8 final), which the image entrypoint turns into the
 serve flags. Defaults: `-p eu-north1`, `gpu-h100-sxm` / `1gpu-16vcpu-200gb`, `--auth none`,
-`IMAGE=…/cosmos-droid-vllm:v4`. `--wait` blocks until the endpoint reaches RUNNING.
+`IMAGE=…/cosmos-droid-vllm:v5`. `--wait` blocks until the endpoint reaches RUNNING.
 
 ```bash
 export HF_TOKEN=...
