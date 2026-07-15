@@ -1,14 +1,14 @@
-"""Per-configuration log artifacts (specification_revised.txt §7).
+"""Per-configuration log artifacts.
 
 Each subprocess (run_configuration.py) writes, into its own output directory:
 
-    <cid>.jsonl        one row per request (the §7 minimal log format)
+    <cid>.jsonl        one row per request (the minimal log format)
     summary.json       p50/p90/p99 rollups + config metadata
     environment.json   package versions / engine flags (reproducibility)
-    system-info.json   GPU model, driver, clocks, temperature (drift accounting, §8)
+    system-info.json   GPU model, driver, clocks, temperature (drift accounting)
     status.json        started/finished/ok, warmup + measured counts, baseline flag
 
-The aggregation job (§4 Job 5) merges every subprocess's files.
+The aggregation job merges every subprocess's files.
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def write_summary(records: list[LatencyRecord], path: str | Path, *,
         "configuration": configuration,
         "waterfall": waterfall,
         "engine": engine,
-        "batch_size": 1,               # §6: batch size 1 for all latency measurements
+        "batch_size": 1,               # batch size 1 for all latency measurements
         "lossy_quality_gated": lossy,
         "warmup_requests": warmups,
         "measured_requests": len(records),
@@ -81,15 +81,15 @@ def write_environment(path: str | Path, *, engine: str, model: str,
         "python": sys.version.split()[0],
         "packages": {m: _ver(m) for m in ("numpy", "torch", "vllm", "matplotlib")},
         "stage_flags": stage_flags,
-        "reasoner_sampling": asdict(REASONER_SAMPLING),     # max_tokens/temperature/... (§10)
-        "generator_sampling": asdict(GENERATOR_SAMPLING),   # steps/guidance/shift/cfg (§10)
+        "reasoner_sampling": asdict(REASONER_SAMPLING),     # max_tokens/temperature/...
+        "generator_sampling": asdict(GENERATOR_SAMPLING),   # steps/guidance/shift/cfg
         "torchinductor_cache_dir": torchinductor_dir,
     }, indent=2))
     return p
 
 
 def write_system_info(path: str | Path) -> Path:
-    """GPU model / driver / clocks / temperature (§8 drift accounting). Falls back to
+    """GPU model / driver / clocks / temperature (drift accounting). Falls back to
     platform info when nvidia-smi / torch.cuda are unavailable (mock/CPU runs)."""
     info = {
         "captured_at": _now(),

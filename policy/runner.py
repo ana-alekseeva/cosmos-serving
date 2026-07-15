@@ -1,11 +1,11 @@
-"""Run ONE configuration end-to-end (specification_revised.txt §4 Job 1 subprocess).
+"""Run ONE configuration end-to-end (Job 1 subprocess).
 
 Each configuration runs as its own subprocess (run_configuration.py) so its CUDA context
-is released before the next one starts (§4). The subprocess:
+is released before the next one starts. The subprocess:
 
     1. loads the model from local storage
-    2. runs warm-up requests (excluded from timing, §6)
-    3. runs the fixed latency replay set (the 50 unique obs, once each; §6)
+    2. runs warm-up requests (excluded from timing)
+    3. runs the fixed latency replay set (the 50 unique obs, once each)
     4. writes <cid>.jsonl + summary.json + environment.json + system-info.json + status.json
     5. exits (releasing the CUDA context)
 
@@ -36,7 +36,7 @@ def _now() -> str:
 
 
 def set_torchinductor_cache(config: Config, root: str) -> str:
-    """Per-configuration compilation-cache directory (§4): /tmp/torchinductor/<cid>.
+    """Per-configuration compilation-cache directory: /tmp/torchinductor/<cid>.
     Isolates each config's torch.compile cache so timings don't cross-contaminate."""
     cache_dir = str(Path(root) / config.cid)
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
@@ -59,10 +59,10 @@ def run_configuration(
     torchinductor_root: str = "/tmp/torchinductor",
     out_subdir: str | None = None,
 ) -> dict:
-    """Measure `config` over `requests`; write the five §7 artifacts into out_dir/<subdir>/.
+    """Measure `config` over `requests`; write the five artifacts into out_dir/<subdir>/.
 
     `out_subdir` defaults to the config id; the matrix passes e.g. "E0_end" for the repeated
-    end-of-run baseline so it does not overwrite the start baseline (§8)."""
+    end-of-run baseline so it does not overwrite the start baseline."""
     cfg_dir = Path(out_dir) / (out_subdir or config.cid)
     cfg_dir.mkdir(parents=True, exist_ok=True)
     started = _now()
@@ -112,7 +112,7 @@ def run_configuration(
 
 def _quality_drift(config: Config, backend: str) -> float | None:
     """Modeled action drift for lossy configs (mock only) — the RoboLab subset is the real
-    gate (§5/§9). Lossless configs are exact-match (drift 0)."""
+    gate. Lossless configs are exact-match (drift 0)."""
     if backend != "mock":
         return None
     from policy.mock.engine import _quality_gate
@@ -129,7 +129,7 @@ def resolve_configs(cids: list[str] | None):
 
 
 def load_requests(exp: Experiment) -> list[DroidRequest]:
-    """Load the replay manifest (§5), sized to replay_size measured requests.
+    """Load the replay manifest, sized to replay_size measured requests.
 
     Default replay_size == the unique set, so every observation is measured once (tile_to is a
     pass-through); a smoke run (replay_size=1) takes the first one, and a larger replay_size

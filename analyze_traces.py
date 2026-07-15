@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Trace + results analysis figures (report plots beyond aggregate.py's §2 set).
+"""Trace + results analysis figures (report plots beyond aggregate.py's required-output set).
 
 Consumes the matrix results dir (per-config JSONL) plus the job's profiler traces
 (`traces.tar.gz` from ${OUTPUT_URI}raw/, or an extracted directory) and produces:

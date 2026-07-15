@@ -6,7 +6,7 @@
 # and the RoboLab task-success gate that guards them (run_robolab.py / jobs/job3-robolab-subset)
 # both live in the repository, not in this config.
 #
-# The only evaluated task (§1): DROID camera observations + language instruction + proprioceptive
+# The only evaluated task: DROID camera observations + language instruction + proprioceptive
 # state -> 32x8 robot-action chunk. Reasoner served by vLLM (Qwen3-VL path); Generator / full
 # policy by vLLM-Omni.
 
@@ -18,8 +18,8 @@ serve:
   project: serverless-challenge
   name: cosmos-policy
   # The final end-to-end optimized configuration (E6): torch.compile + CUDA graphs +
-  # reasoner-conditioning-cache + Cache-DiT + FP8. On a >=2-GPU preset, add CFG-Parallel (§3,
-  # Job 1b) — a scaling win, not a per-GPU algorithmic one. Baked in as vLLM-Omni serve args
+  # reasoner-conditioning-cache + Cache-DiT + FP8. On a >=2-GPU preset, add CFG-Parallel
+  # (Job 1b) — a scaling win, not a per-GPU algorithmic one. Baked in as vLLM-Omni serve args
   # (policy/serving.py::engine_args); jobs/deploy-optimized.sh applies them.
   configuration: E6
   engine_args:

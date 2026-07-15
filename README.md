@@ -138,7 +138,6 @@ uv run python run_robolab.py --backend vllm --side both --robolab-root RoboLab \
 | `policy/` | The pipeline: config matrix, replay dataset, latency measurement, aggregation, plots, vLLM serving contract, RoboLab runner |
 | `tests/` | Harness invariant tests (`uv run --group dev pytest`) |
 | `results/` | Local download target for Job 2 / Job 3 outputs |
-| `specification_revised.md` | Design spec (the `§` references throughout the code) |
 
 ## Local smoke test (no GPU)
 

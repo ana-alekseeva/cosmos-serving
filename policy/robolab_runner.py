@@ -1,4 +1,4 @@
-"""Real RoboLab rollout driver (specification_revised.txt §4 Job 3, §5) — Isaac box only.
+"""Real RoboLab rollout driver (Job 3) — Isaac box only.
 
 Drives the RoboLab benchmark (NVLabs/RoboLab, Isaac Lab) against a DEPLOYED Cosmos3
 endpoint and turns the per-task rollout outputs into the success dict the gate in
@@ -24,7 +24,7 @@ Contract, verified against the RoboLab docs (2026-07-15):
     (docs/policy.md); the exact schema is unpublished, so parse_task_success() accepts
     the plausible shapes and fails loudly (listing every file it saw) otherwise.
 
-Reruns are idempotent (§10): each parsed task writes a per-task record under the rollout
+Reruns are idempotent: each parsed task writes a per-task record under the rollout
 dir, and an existing record short-circuits the subprocess — a crashed job resumes where
 it stopped instead of re-simulating finished tasks.
 """
@@ -178,7 +178,7 @@ def run_task(config: Config, qtask: QualityTask, task_name: str, *, robolab_root
     """Roll out one (config, task) and record its success; existing records short-circuit."""
     record_path = Path(rollout_dir) / config.cid / f"{qtask.task}.json"
     if record_path.exists():
-        return json.loads(record_path.read_text())      # resume: never re-simulate (§10)
+        return json.loads(record_path.read_text())      # resume: never re-simulate
     # Only an actual rollout needs the checkout — the gate run resumes from records alone.
     if not Path(robolab_root).is_dir():
         raise FileNotFoundError(

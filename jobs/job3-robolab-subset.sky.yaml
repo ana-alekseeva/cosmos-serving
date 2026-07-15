@@ -1,18 +1,18 @@
-# Job 3 — RoboLab subset evaluation (specification_revised.txt §4, §5).
+# Job 3 — RoboLab subset evaluation.
 #
 # The quality gate for the lossy techniques (Cache-DiT, FP8): run the stratified 18-task
-# subset (3 capability groups x 3 difficulty x 2 tasks, 10 episodes each, §5) and REJECT any
+# subset (3 capability groups x 3 difficulty x 2 tasks, 10 episodes each) and REJECT any
 # optimization that regresses task success beyond SUCCESS_DROP_THRESHOLD. Real rollouts:
 # policy/robolab_runner.py drives the RoboLab runner per task against each endpoint's OpenPI
 # websocket route and run_robolab.py gates the parsed success rates. Prerequisite: fill the
 # 18 slots in config/robolab_tasks.yaml with real RoboLab task names (the run refuses to
-# start otherwise). Runs three configurations (§4): baseline, final optimized PyTorch,
+# start otherwise). Runs three configurations: baseline, final optimized PyTorch,
 # final production.
 #
 # HARDWARE — a DIFFERENT stack than the ablation. RoboLab needs Isaac Sim 5.x + Isaac Lab on an
 # RT-core GPU (>=48 GB): a Nebius RT-core platform (gpu-l40s-d / RTX PRO 6000), NOT gpu-h200-sxm
 # (H200 has no RT cores). The spec prefers a simulator job connected to a SEPARATE inference
-# endpoint so rendering/physics don't compete with inference on the same GPU (§4). Every
+# endpoint so rendering/physics don't compete with inference on the same GPU. Every
 # `# VERIFY` must be confirmed on-box before the numbers are trustworthy.
 #
 # TWO PARALLEL JOBS, one endpoint each (keeps the eval under the ~1 h wall budget: each
@@ -45,7 +45,7 @@ envs:
   REPO_REF: "main"
   ROBOLAB_REPO: "https://github.com/NVLabs/RoboLab.git"             # VERIFY ref + access
   ROBOLAB_REF: "main"
-  MODE: "subset"                    # 18-task stratified subset (§5)
+  MODE: "subset"                    # 18-task stratified subset
   ROLE: "baseline"                  # baseline | optimized — ONE endpoint per job (parallel L40S)
   EPISODES_PER_TASK: "10"           # run as parallel sim envs (--num-envs); VERIFY VRAM fits
                                     # 10 envs on 48 GB (RoboLab docs/env_vram_size_guide.md)

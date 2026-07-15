@@ -1,5 +1,5 @@
-"""Real-backend serving contract for the policy pipeline (specification_revised.txt §4
-Job 2, §9) — STOCK vLLM-Omni (>=0.22 registers Cosmos3OmniDiffusersPipeline, the
+"""Real-backend serving contract for the policy pipeline (Job 2) — STOCK vLLM-Omni
+(>=0.22 registers Cosmos3OmniDiffusersPipeline, the
 checkpoint's declared class; pins in deploy/versions.env, feasibility-verified on H100).
 
 Topology note: ONE engine serves BOTH towers. The Qwen3-VL Reasoner and the diffusion
@@ -38,7 +38,7 @@ def reasoner_sampling_params() -> dict:
     """vLLM SamplingParams for the Reasoner (Qwen3-VL) conditioning pass.
 
     The Reasoner is stock vLLM and conditioning-only — it does not generate standalone text
-    (§2) — decoded deterministically so conditioning is reproducible (§10). These go on the
+    — decoded deterministically so conditioning is reproducible. These go on the
     conditioning request (constant across the whole replay set). VERIFY the SamplingParams
     field names against your vLLM version and the canonical max_tokens on-box."""
     s = REASONER_SAMPLING
@@ -55,16 +55,16 @@ def engine_args(config: Config) -> list[str]:
     """Config -> vLLM-Omni ENGINE flags (serve-time). The Generator sampling recipe is NOT
     here — it is per-request form fields (request_form_fields below), per the 0.24 API."""
     flags = config.stage_flags
-    args: list[str] = ["--max-num-seqs", "1"]        # batch size 1 (§6); model is positional
+    args: list[str] = ["--max-num-seqs", "1"]        # batch size 1; model is positional
 
     # Attention backend for the DIFFUSION tower, per-role dot-notation (vllm-omni docs form).
-    # Force it explicitly; do NOT silently fall back (§9).
+    # Force it explicitly; do NOT silently fall back.
     if flags.get("attention") == "flash":
         args += ["--diffusion-attention-config.per_role.self.backend", "FLASH_ATTN"]
     else:
         args += ["--diffusion-attention-config.per_role.self.backend", "TORCH_SDPA"]  # VERIFY value
 
-    # torch.compile / CUDA graphs, kept distinct so they are not double-counted (§9).
+    # torch.compile / CUDA graphs, kept distinct so they are not double-counted.
     # Verified 0.24 semantics: the DIFFUSION tower compiles iff --enforce-eager is ABSENT
     # (diffusion_model_runner regionally_compiles the transformer; no diffusion cudagraph
     # knob exists), while --compilation-config governs the AR tower (CompilationMode enum:
@@ -106,7 +106,7 @@ def engine_args(config: Config) -> list[str]:
         args += ["--profiler-config",
                  json.dumps({"profiler": "torch", "torch_profiler_dir": profiler_dir})]
 
-    # Multi-GPU (jobs/job2b, §5.3.3) — vllm-omni's names (Omni ctor: cfg_parallel_size,
+    # Multi-GPU (jobs/job2b) — vllm-omni's names (Omni ctor: cfg_parallel_size,
     # ulysses_degree). Driven by env so a job sets it without touching the config matrix.
     tp = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
     if tp > 1:
@@ -122,7 +122,7 @@ def engine_args(config: Config) -> list[str]:
 
 def request_form_fields(seed: int) -> dict[str, str]:
     """Per-REQUEST Generator recipe (steps=4, guidance=3, shift=5) + fixed seed — identical
-    across every rung so the technique (not a changed schedule) explains the delta (§9/§10).
+    across every rung so the technique (not a changed schedule) explains the delta.
     These are /v1/videos form fields on 0.24, NOT serve flags. cfg_mode has no form field —
     CFG Null semantics live in the checkpoint's pipeline config (VERIFY on-box)."""
     s = GENERATOR_SAMPLING
@@ -150,7 +150,7 @@ def stop_profile(endpoint: str) -> None:
 
 
 def sdpa_attention_snippet() -> str:
-    """The §9 forced-Flash SDPA pattern the eager path uses (documented for reference)."""
+    """The forced-Flash SDPA pattern the eager path uses (documented for reference)."""
     return (
         "from torch.nn.attention import SDPBackend, sdpa_kernel\n"
         "import torch.nn.functional as F\n"
@@ -172,7 +172,7 @@ class ServerHandle:
         self._proc = None
         try:
             proc.terminate()
-            proc.wait(timeout=30)               # let it drain the CUDA context (§4)
+            proc.wait(timeout=30)               # let it drain the CUDA context
         except subprocess.TimeoutExpired:
             proc.kill()                          # force if it will not exit
         except Exception:
@@ -197,7 +197,7 @@ def start_policy_server(model: str, config: Config, *, host: str = "127.0.0.1",
     """Launch vLLM-Omni with `config`'s engine flags and block until /health is 200.
 
     VERIFY on-box: the serve entrypoint (SERVE_CMD), that every engine_args() flag is accepted,
-    the static-shape / bucketing config the CUDA-graph rungs need (§9), and the readiness route.
+    the static-shape / bucketing config the CUDA-graph rungs need, and the readiness route.
     """
     cmd = [*SERVE_CMD, model, OMNI_FLAG, *engine_args(config), "--host", host, "--port", str(port)]
     proc = subprocess.Popen(cmd)                 # inherits stdout/stderr -> job logs
@@ -269,7 +269,7 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
     fields = {
         "model": model,
         "prompt": instruction if instruction.strip() else " ",
-        **request_form_fields(req.seed),            # steps/guidance/shift/seed (fixed, §10)
+        **request_form_fields(req.seed),            # steps/guidance/shift/seed (fixed)
         # server-enforced: num_frames == action_chunk_size (or +1) for action requests
         "num_frames": "32",
         "extra_params": json.dumps({

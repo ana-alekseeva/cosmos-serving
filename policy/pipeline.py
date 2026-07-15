@@ -1,4 +1,4 @@
-"""Policy inference pipeline — REAL backend + engine factory (specification_revised.txt §6).
+"""Policy inference pipeline — REAL backend + engine factory.
 
 One request = one DROID observation -> one 32x8 action chunk.
 
@@ -43,8 +43,8 @@ class VLLMPolicyEngine:
     def prepare(self) -> None:
         import os
 
-        compat.validate(self.config, "vllm")                 # §5.3.3: vLLM-Omni technique set
-        for pair, why in compat.conflicts(self.config):      # §9: warn on non-composing pairs
+        compat.validate(self.config, "vllm")                 # vLLM-Omni technique set
+        for pair, why in compat.conflicts(self.config):      # warn on non-composing pairs
             names = " + ".join(compat.TECHNIQUES[k][0] for k in pair)
             warnings.warn(f"{self.config.cid}: {names} — {why}", stacklevel=2)
         if self.endpoint:                   # externally-deployed endpoint: nothing to launch
@@ -53,7 +53,7 @@ class VLLMPolicyEngine:
         # turns VLLM_TORCH_PROFILER_DIR into the --profiler-config engine flag (the env var
         # itself was removed from vllm 0.19.1); traces flush on /stop_profile (capture_profile
         # below). Point it at a per-config SUBDIR so trace_E0 vs trace_E6 are attributable —
-        # safe to mutate os.environ: each config runs in its own subprocess (§4), and
+        # safe to mutate os.environ: each config runs in its own subprocess, and
         # engine_args() reads it at launch time.
         base = os.environ.get("VLLM_TORCH_PROFILER_DIR")
         if base:
@@ -75,7 +75,7 @@ class VLLMPolicyEngine:
         total_ms = (time.perf_counter() - t0) * 1e3
         # The completed async job record carries SERVER-side timing: inference_time_s (the
         # authoritative server total) and stage_durations (per-omni-stage seconds). Map the
-        # omni stages onto our §7 fields heuristically (AR/reasoner-ish -> reasoner_ms,
+        # omni stages onto our latency fields heuristically (AR/reasoner-ish -> reasoner_ms,
         # diffusion-ish -> denoising_ms); finer attribution comes from profiler traces
         # (capture_profile). total_chunk_ms stays client-measured (includes <=25ms poll noise).
         server = float(resp.get("inference_time_s", total_ms / 1e3)) * 1e3
@@ -131,8 +131,8 @@ BACKENDS = ("mock", "pytorch", "vllm")
 
 def make_engine(backend: str, config: Config, *, model: str | None = None,
                 endpoint: str | None = None, checkpoint_dir: str | None = None):
-    """Build a policy engine. `pytorch` = native §5.3.1 reference (waterfall, Job 1);
-    `vllm` = vLLM/vLLM-Omni production (§5.3.2/§5.3.3, Job 2); `mock` = modeled, no GPU."""
+    """Build a policy engine. `pytorch` = native reference (waterfall, Job 1);
+    `vllm` = vLLM/vLLM-Omni production (Job 2); `mock` = modeled, no GPU."""
     if backend == "mock":
         return MockPolicyEngine(config, model=model)
     if backend == "pytorch":

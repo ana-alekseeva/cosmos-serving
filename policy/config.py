@@ -6,11 +6,11 @@ import and exposes it as `CONFIG`; every other module pulls its numbers from her
 of hard-coding them, so the file and the code cannot drift.
 
 Sections (see config/experiment.yaml):
-    run                — run id, model, backend, endpoint, paths, §8 bias controls
-    dataset            — DROID observation shapes + RoboLab quality-subset structure (§5)
+    run                — run id, model, backend, endpoint, paths, bias controls
+    dataset            — DROID observation shapes + RoboLab quality-subset structure
     generator_sampling — action-diffusion recipe: steps / guidance / shift / CFG mode
-    measurement        — warm-ups, min measured, percentiles (§6)
-    quality_gate       — lossy-technique accept/reject thresholds (§9)
+    measurement        — warm-ups, min measured, percentiles
+    quality_gate       — lossy-technique accept/reject thresholds
 
 What is deliberately NOT here (per design): the mock simulator's internal anchors — the
 per-stage cost table and per-technique speedup multipliers (policy/pipeline.py,
@@ -35,10 +35,10 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "experiment.ya
 
 @dataclass(frozen=True)
 class RunConfig:
-    """Run-level knobs + §8 bias controls (the record-of-record for a provisioned job)."""
+    """Run-level knobs + bias controls (the record-of-record for a provisioned job)."""
     run_id: str = "cosmos-droid-001"
     model: str = "nvidia/Cosmos3-Nano-Policy-DROID"
-    checkpoint_dir: str = "/local/model"          # weights staged locally before timing (§8)
+    checkpoint_dir: str = "/local/model"          # weights staged locally before timing
     backend: str = "mock"                         # mock (no GPU) | vllm (target inference GPU)
     endpoint: str | None = None                   # vllm: externally-deployed endpoint (else launched)
     input_manifest: str = "policy/mock/manifest.json"
@@ -54,15 +54,15 @@ class RunConfig:
 
 @dataclass(frozen=True)
 class DatasetConfig:
-    """DROID observation shapes (static → CUDA-graph friendly, §9) + RoboLab quality subset
-    structure (§5). Shapes are fixed across the replay set; the subset is 3×3×2 stratified."""
+    """DROID observation shapes (static → CUDA-graph friendly) + RoboLab quality subset
+    structure. Shapes are fixed across the replay set; the subset is 3×3×2 stratified."""
     camera_views: tuple = ("exterior", "wrist")   # DROID convention: exterior + wrist
     image_hw: tuple = (180, 320)                  # per-view RGB fed to the reasoner (VERIFY on-box)
     proprio_dim: int = 8                          # joint pos/vel + gripper
     instruction_tokens: int = 32                  # tokenized language-instruction length (bucketed)
-    action_chunk: tuple = (32, 8)                 # the only evaluated task (§1): 32 steps × 8 DoF
+    action_chunk: tuple = (32, 8)                 # the only evaluated task: 32 steps × 8 DoF
     replay_size: int = 50                         # MEASURED requests/config = the 50 unique obs, once each
-    replay_seed: int = 20260713                   # deterministic → reproducible logs (§10)
+    replay_seed: int = 20260713                   # deterministic → reproducible logs
     capability_groups: tuple = ("visual", "relational", "procedural")   # RoboLab attribute families
     difficulty_levels: tuple = ("easy", "medium", "hard")
     tasks_per_cell: int = 2                        # 3 groups × 3 difficulty × 2 = 18 tasks
@@ -76,8 +76,8 @@ class GeneratorSampling:
     Model-level inference hyperparameters, NOT per-rung optimization knobs: the whole
     generator/end-to-end waterfall samples with the SAME recipe, so the optimization
     techniques — and not a changed schedule — explain the latency deltas. `steps` is the
-    denoising-loop length and therefore a static shape (§9) the CUDA-graph rungs capture;
-    `denoising_step_ms` is an array of this length. Logged into environment.json (§10)."""
+    denoising-loop length and therefore a static shape the CUDA-graph rungs capture;
+    `denoising_step_ms` is an array of this length. Logged into environment.json."""
     steps: int = 4                      # denoising / flow-matching steps per action chunk
     guidance: float = 3.0              # classifier-free guidance scale
     shift: float = 5.0                 # flow-matching timestep-schedule shift
@@ -86,7 +86,7 @@ class GeneratorSampling:
     @property
     def uses_cfg(self) -> bool:
         """CFG active (a real CFG mode with guidance>1) -> the CFG-Parallel multi-GPU
-        experiment applies (§3, policy/multigpu.py)."""
+        experiment applies (policy/multigpu.py)."""
         return self.cfg_mode != "none" and self.guidance > 1.0
 
 
@@ -95,25 +95,25 @@ class ReasonerSampling:
     """Reasoner (Qwen3-VL conditioning) decode parameters for Cosmos3-Nano-Policy-DROID.
 
     The Reasoner is measured ONLY as action-policy conditioning — it does NOT generate
-    standalone text (specification_revised.txt §2). Decoding is deterministic (temperature 0)
-    so the conditioning — and therefore the logged action chunk — is reproducible (§10). These
+    standalone text. Decoding is deterministic (temperature 0)
+    so the conditioning — and therefore the logged action chunk — is reproducible. These
     are the vLLM SamplingParams for the conditioning pass; VERIFY the canonical values on-box,
     especially `max_tokens` (the conditioning-token budget per observation)."""
     max_tokens: int = 256          # conditioning-token budget per observation (VERIFY on-box)
-    temperature: float = 0.0       # greedy / deterministic conditioning (reproducible, §10)
+    temperature: float = 0.0       # greedy / deterministic conditioning (reproducible)
     top_p: float = 1.0             # no nucleus truncation (inactive at temperature 0)
     top_k: int = -1                # disabled (vLLM convention)
     repetition_penalty: float = 1.0  # none (1.0 == off)
 
     @property
     def greedy(self) -> bool:
-        """Deterministic decode (temperature 0) -> reproducible conditioning (§10)."""
+        """Deterministic decode (temperature 0) -> reproducible conditioning."""
         return self.temperature == 0.0
 
 
 @dataclass(frozen=True)
 class MeasurementConfig:
-    """§6 + latency best practice: batch 1, ~50 warm-ups (excluded), measured = replay_size (the
+    """Latency best practice: batch 1, ~50 warm-ups (excluded), measured = replay_size (the
     50 unique real obs, once each), p50/p90/p99 summaries (p99 rough at n=50)."""
     warmup_requests: int = 50
     min_measured_requests: int = 50
@@ -122,7 +122,7 @@ class MeasurementConfig:
 
 @dataclass(frozen=True)
 class QualityGateConfig:
-    """Lossy-technique (Cache-DiT / FP8) accept/reject thresholds (§9)."""
+    """Lossy-technique (Cache-DiT / FP8) accept/reject thresholds."""
     action_mse_threshold: float = 0.02   # mock action-drift gate (policy/pipeline.py)
     robolab_success_drop: float = 0.03   # RoboLab-subset success-drop gate (policy/robolab.py)
 

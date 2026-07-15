@@ -1,4 +1,4 @@
-# Stratified 18-task RoboLab subset (§5) -> real RoboLab task names (NVLabs/RoboLab
+# Stratified 18-task RoboLab subset -> real RoboLab task names (NVLabs/RoboLab
 # benchmark, 120 tasks; catalog: robolab/tasks/_metadata/task_metadata.json).
 #
 # WHY THESE 18 — the gate exists to catch FP8/Cache-DiT *action* degradation against the

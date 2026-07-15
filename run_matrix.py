@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""PyTorch ablation matrix (specification_revised.txt §4 Job 1).
+"""PyTorch ablation matrix (Job 1).
 
 Runs every single-GPU configuration (P0-P3, E0-E4) as an isolated subprocess, with
-the §8 bias controls (baseline at start + end, randomized order, wait between, drift
+the bias controls (baseline at start + end, randomized order, wait between, drift
 rejection). One provisioned GPU; each config releases its CUDA context on exit.
 
     python run_matrix.py --config config/experiment.yaml \

@@ -1,10 +1,10 @@
-"""RoboLab quality evaluation (specification_revised.txt §4 Jobs 3-4, §5).
+"""RoboLab quality evaluation.
 
 The waterfalls optimize *latency*; RoboLab confirms the lossy techniques (Cache-DiT, FP8)
 don't damage *policy performance*, measured as task success from executing the generated
-actions — not a pixel proxy (§1: "evaluated by executing its generated actions in RoboLab").
+actions — not a pixel proxy ("evaluated by executing its generated actions in RoboLab").
 
-  * Job 3 — subset: the stratified 18-task subset (§5), 10 episodes each, for
+  * Job 3 — subset: the stratified 18-task subset, 10 episodes each, for
     {baseline, final optimized PyTorch, final production}. Rejects an optimization that
     regresses success beyond the threshold.
   * Job 4 — full: the complete RoboLab benchmark for {baseline, final production} only,
@@ -56,7 +56,7 @@ def compare(baseline_cid: str, candidate_cid: str, *, backend: str = "mock",
             endpoint_baseline: str | None = None, endpoint_candidate: str | None = None,
             robolab_root: Path | None = None, rollout_dir: Path | None = None,
             episodes: int | None = None) -> dict:
-    """Subset comparison + accept/reject vs SUCCESS_DROP_THRESHOLD (§9 lossy gate)."""
+    """Subset comparison + accept/reject vs SUCCESS_DROP_THRESHOLD (lossy gate)."""
     base = run_quality_subset(config_by_id(baseline_cid), backend=backend,
                               endpoint=endpoint_baseline, robolab_root=robolab_root,
                               rollout_dir=rollout_dir, episodes=episodes)
@@ -78,7 +78,7 @@ def _run_real_robolab(config: Config, endpoint: str | None, subset, *,
                       robolab_root: Path | None = None,
                       rollout_dir: Path | None = None,
                       episodes: int | None = None) -> dict:
-    """Real RoboLab eval — Isaac Sim/Isaac Lab on an RT-core box (§4 Job 3), rollouts
+    """Real RoboLab eval — Isaac Sim/Isaac Lab on an RT-core box (Job 3), rollouts
     against the endpoint's OpenPI websocket route. Import stays local: the driver is
     Isaac-box-only and the mock path must not pay for it."""
     from policy.robolab_runner import run_quality_subset_real

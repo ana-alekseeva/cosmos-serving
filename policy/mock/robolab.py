@@ -1,4 +1,4 @@
-"""Modeled RoboLab task success (MOCK — specification_revised.txt §4 Jobs 3-4, §5).
+"""Modeled RoboLab task success (MOCK).
 
 The real RoboLab gate drives Isaac Sim / Isaac Lab on an RT-core GPU and measures task
 success from executing the generated actions (policy/robolab.py::_run_real_robolab). This

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""RoboLab quality evaluation (specification_revised.txt §4 Jobs 3-4, §5).
+"""RoboLab quality evaluation.
 
 Compares a candidate configuration's task success against the baseline on the stratified
 18-task subset (Job 3) and rejects it if success regresses beyond the threshold — the gate

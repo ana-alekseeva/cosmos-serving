@@ -1,4 +1,4 @@
-"""Shared data contract for the latency harness (specification_revised.txt §5).
+"""Shared data contract for the latency harness.
 
 Backend-agnostic: this module defines the request/task TYPES and the manifest LOADER that
 BOTH the mock and the real (vLLM/vLLM-Omni) paths consume. It holds no synthetic data — the
@@ -9,7 +9,7 @@ shapes live there, not in code).
      from `manifest.json`. Each request carries camera observations, instruction,
      proprioceptive state, task/episode ids, control timestep, and a fixed inference seed.
      The real driver rebuilds tensors from `capture_ref`; the mock reads only the shape
-     metadata (latency is shape-driven, §5). Each observation is measured once by default;
+     metadata (latency is shape-driven). Each observation is measured once by default;
      `tile_to` can cycle the set to a larger measured count for tighter tail percentiles.
 
   2. RoboLab quality subset — a stratified ~18-task subset (3 capability groups x 3
@@ -30,16 +30,16 @@ from policy.config import CONFIG
 
 # All shapes/structure come from the single config file (config/experiment.yaml -> CONFIG).
 # These module names are kept as thin re-exports so callers read the same symbols. DROID
-# shapes are static across the replay set so CUDA-graph configs capture fixed shapes (§9).
+# shapes are static across the replay set so CUDA-graph configs capture fixed shapes.
 _D = CONFIG.dataset
 CAMERA_VIEWS = _D.camera_views          # DROID convention (exterior + wrist)
 IMAGE_HW = _D.image_hw                  # per-view RGB resolution fed to the reasoner
 PROPRIO_DIM = _D.proprio_dim            # proprioceptive state dim (joint pos/vel + gripper)
-INSTRUCTION_TOKENS = _D.instruction_tokens   # tokenized language-instruction length (bucketed, §9)
+INSTRUCTION_TOKENS = _D.instruction_tokens   # tokenized language-instruction length (bucketed)
 
 DEFAULT_REPLAY_SIZE = _D.replay_size    # measured requests/config (= the unique replay set)
 
-# RoboLab quality subset structure (§5): 3 capability groups x 3 difficulty x 2 tasks = 18.
+# RoboLab quality subset structure: 3 capability groups x 3 difficulty x 2 tasks = 18.
 CAPABILITY_GROUPS = _D.capability_groups
 DIFFICULTY_LEVELS = _D.difficulty_levels
 TASKS_PER_CELL = _D.tasks_per_cell
@@ -48,7 +48,7 @@ EPISODES_PER_TASK = _D.episodes_per_task
 
 @dataclass(frozen=True)
 class DroidRequest:
-    """One captured control step — the unit of the offline replay set (§5)."""
+    """One captured control step — the unit of the offline replay set."""
     request_id: int
     task: str
     episode_id: int
@@ -124,7 +124,7 @@ def tile_to(requests: list[DroidRequest], n: int) -> list[DroidRequest]:
     Default: `n == len(requests)`, so this is a pass-through — every unique observation is
     measured once. `n < len` takes the first `n` (e.g. a smoke run's replay_size=1). `n > len`
     cycles the set (raise replay_size if you want repeats for tighter tail percentiles).
-    Deterministic (reproducible, §10): `request_id` is the measured-slot index and the seed is
+    Deterministic (reproducible): `request_id` is the measured-slot index and the seed is
     re-derived per repeat, so any cycled requests are distinct but a pure function of input."""
     if not requests:
         return []
@@ -139,7 +139,7 @@ def tile_to(requests: list[DroidRequest], n: int) -> list[DroidRequest]:
 
 
 # ---------------------------------------------------------------------------
-# RoboLab quality subset (§5) — stratified 3x3x2 = 18 tasks, 10 episodes each.
+# RoboLab quality subset — stratified 3x3x2 = 18 tasks, 10 episodes each.
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class QualityTask:

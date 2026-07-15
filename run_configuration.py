@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""Run ONE optimization configuration (specification_revised.txt §4 Job 1 subprocess).
+"""Run ONE optimization configuration (Job 1 subprocess).
 
 Invoked once per configuration by run_matrix.py, in its own process so the CUDA context is
 released on exit. Loads the model, warms up, replays the fixed latency set, and writes the
-five §7 artifacts (<cid>.jsonl, summary.json, environment.json, system-info.json,
+five artifacts (<cid>.jsonl, summary.json, environment.json, system-info.json,
 status.json) into <out-dir>/<out-subdir>/.
 
     python run_configuration.py --configuration P0 --backend mock --out-dir results

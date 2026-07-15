@@ -1,7 +1,7 @@
 """Sanity tests for the Cosmos3-Nano-Policy-DROID harness — `uv run pytest`.
 
-Tests LOGIC and INVARIANTS (waterfall monotonicity, the §7 log schema, reproducibility,
-the §8 drift check, the §10 acceptance checks, the quality gate), not the mock's modeled
+Tests LOGIC and INVARIANTS (waterfall monotonicity, the log schema, reproducibility,
+the drift check, the acceptance checks, the quality gate), not the mock's modeled
 constants (those are replaced by real vLLM/vLLM-Omni measurements on the GPU) nor the
 matplotlib rendering.
 """
@@ -37,7 +37,7 @@ from policy.pipeline import make_engine
 from policy import robolab, robolab_runner
 
 
-# -- Config matrix (§3) -----------------------------------------------------------
+# -- Config matrix -----------------------------------------------------------
 def test_ladders_match_spec():
     assert [c.cid for c in NATIVE_LADDER] == ["P0", "P1", "P2", "P3"]
     assert [c.cid for c in END_TO_END_LADDER] == ["E0", "E1", "E2", "E3", "E4"]
@@ -60,12 +60,12 @@ def test_end_to_end_ladder_is_the_union_spec_lists():
     assert added == ["flash-attention", "torch.compile", "cuda-graphs", "fp8"]
 
 
-# -- Replay dataset + quality subset (§5) -----------------------------------------
+# -- Replay dataset + quality subset -----------------------------------------
 def test_replay_set_is_fixed_and_deterministic():
     a = build_mock_replay(256, seed=20260713)
     b = build_mock_replay(256, seed=20260713)
     assert len(a) == 256
-    assert [r.seed for r in a] == [r.seed for r in b]         # reproducible (§10)
+    assert [r.seed for r in a] == [r.seed for r in b]         # reproducible
     assert {r.instruction for r in a}                          # instructions vary
 
 
@@ -77,7 +77,7 @@ def test_quality_subset_is_3x3x2():
     assert all(t.episodes == 10 for t in sub)
 
 
-# -- §7 log schema ----------------------------------------------------------------
+# -- log schema ----------------------------------------------------------------
 def test_jsonl_row_has_every_required_field():
     req = build_mock_replay(1)[0]
     rec = make_engine("mock", config_by_id("E4")).run_request(req)
@@ -101,12 +101,12 @@ def test_generator_sampling_recipe():
     s = GENERATOR_SAMPLING
     assert (s.steps, s.guidance, s.shift, s.cfg_mode) == (4, 3.0, 5.0, "full-range-null")
     assert N_DENOISE_STEPS == s.steps == 4
-    assert s.uses_cfg is True                                  # gates the CFG-Parallel job (§3)
+    assert s.uses_cfg is True                                  # gates the CFG-Parallel job
 
 
 def test_reasoner_sampling_is_deterministic():
-    """Reasoner conditioning is decoded greedily (temperature 0) so logs are reproducible
-    (§10). serving.reasoner_sampling_params() must surface the recipe."""
+    """Reasoner conditioning is decoded greedily (temperature 0) so logs are reproducible.
+    serving.reasoner_sampling_params() must surface the recipe."""
     from policy.serving import reasoner_sampling_params
     s = REASONER_SAMPLING
     assert s.temperature == 0.0 and s.greedy is True
@@ -152,12 +152,12 @@ def test_mock_is_reproducible_across_engine_instances():
     assert a.total_chunk_ms == b.total_chunk_ms                     # no per-process nondeterminism
 
 
-# -- End-to-end: matrix -> aggregate (§4, §8, §10) --------------------------------
+# -- End-to-end: matrix -> aggregate --------------------------------
 @pytest.fixture(scope="module")
 def aggregated(tmp_path_factory):
     out = tmp_path_factory.mktemp("run")
     manifest_path = out / "replay/manifest.json"
-    write_mock_manifest(manifest_path, n=40)              # stage the fixed replay set locally (§8)
+    write_mock_manifest(manifest_path, n=40)              # stage the fixed replay set locally
     exp = Experiment(backend="mock", output_dir=str(out),
                      input_manifest=str(manifest_path), replay_size=40,
                      warmup_requests=5, wait_between_seconds=0.0)
@@ -189,7 +189,7 @@ def test_every_waterfall_is_monotonic_non_increasing(aggregated):
 def test_stage_breakdown_reconciles_to_wall_clock(aggregated):
     out, _, _ = aggregated
     sb = build_stage_breakdown(load_results(out))
-    # the six §3 stages are exactly the buckets, and the final is faster than baseline
+    # the six stages are exactly the buckets, and the final is faster than baseline
     assert set(sb["baseline"]) == set(STAGES)
     assert sb["final_total_ms"] < sb["baseline_total_ms"]
 
@@ -202,7 +202,7 @@ def test_final_acceptance_checks(aggregated):
     assert acc["all_lossy_gates_passed"]
 
 
-# -- RoboLab quality gate (§5, §9) ------------------------------------------------
+# -- RoboLab quality gate ------------------------------------------------
 def test_robolab_subset_gate_passes_for_final():
     result = robolab.compare("E0", END_TO_END_LADDER[-1].cid, backend="mock")
     assert result["success_drop"] <= result["threshold"]
@@ -210,7 +210,7 @@ def test_robolab_subset_gate_passes_for_final():
     assert 0.0 <= result["candidate_success"] <= 1.0
 
 
-# -- Real RoboLab driver (§4 Job 3): everything testable without an Isaac box ------
+# -- Real RoboLab driver (Job 3): everything testable without an Isaac box ------
 def test_openpi_uri_forms():
     f = robolab_runner.openpi_uri
     route = robolab_runner.OPENPI_ROUTE
@@ -265,7 +265,7 @@ def test_parse_task_success_accepts_plausible_shapes(tmp_path):
 
 
 def test_real_subset_resumes_from_records_and_matches_gate_shape(tmp_path):
-    # Pre-written per-task records short-circuit the simulator entirely (§10 resume), so
+    # Pre-written per-task records short-circuit the simulator entirely (resume), so
     # this exercises the full real-path aggregation on a laptop. Shape must match the
     # mock's so compare() gates either backend.
     subset = quality_subset()
@@ -289,15 +289,15 @@ def test_real_subset_resumes_from_records_and_matches_gate_shape(tmp_path):
         assert key in result and key in mock
 
 
-# -- Native PyTorch backend / technique compatibility (§5.3.1 vs §5.3.3) -----------
+# -- Native PyTorch backend / technique compatibility -----------
 def test_pytorch_backend_rejects_vllm_only_techniques():
-    # FP8 (E4) is vLLM-Omni-only (§5.3.3) — not native PyTorch.
+    # FP8 (E4) is vLLM-Omni-only — not native PyTorch.
     for cid in ("E4",):
         c = config_by_id(cid)
         assert not compat.supported(c, "pytorch")
         with pytest.raises(UnsupportedTechnique):
             make_engine("pytorch", c)          # __init__ validates -> refuses
-    # The §5.3.1 rungs ARE native-PyTorch (the whole P ladder, and E0-E4).
+    # These rungs ARE native-PyTorch (the whole P ladder, and E0-E4).
     for cid in ("P0", "P1", "P2", "P3", "E0", "E1", "E2", "E3"):
         assert compat.supported(config_by_id(cid), "pytorch")
 
@@ -307,7 +307,7 @@ def test_vllm_backend_supports_every_config():
 
 
 def test_cachedit_cudagraph_conflict_is_flagged():
-    # Cache-DiT + CUDA graphs is a non-composing pair (§9). No ladder rung carries
+    # Cache-DiT + CUDA graphs is a non-composing pair. No ladder rung carries
     # Cache-DiT anymore (removed after the Job 2 measurements), so the detector is
     # exercised on a hand-built off-ladder config; the ladder itself must be clean.
     e3 = config_by_id("E3")                            # cuda_graphs on
@@ -318,10 +318,10 @@ def test_cachedit_cudagraph_conflict_is_flagged():
 
 def test_end_to_end_and_lossy_route_to_vllm():
     # A native-PyTorch waterfall run routes the production-stack configs to vLLM/vLLM-Omni:
-    #   the whole end-to-end (E) ladder + the Cache-DiT/FP8 rungs (§5.3.2/§5.3.3).
+    #   the whole end-to-end (E) ladder + the Cache-DiT/FP8 rungs.
     for cid in ("E0", "E1", "E2", "E3", "E4"):
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "vllm"
-    for cid in ("P0", "P1", "P2", "P3"):              # native §5.3.1 reference rungs
+    for cid in ("P0", "P1", "P2", "P3"):              # native reference rungs
         assert compat.resolve_backend(config_by_id(cid), "pytorch") == "pytorch"
     for c in all_configs():                           # mock dry-run: everything modeled
         assert compat.resolve_backend(c, "mock") == "mock"

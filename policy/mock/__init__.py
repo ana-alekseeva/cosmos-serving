@@ -5,6 +5,6 @@ package so the plumbing is validated before touching a GPU. None of it runs on t
 vLLM / vLLM-Omni path; swap `--backend mock` -> `--backend vllm` to leave it behind.
 
   * replay.py  — synthetic replay-set generator (produces policy/mock/manifest.json)
-  * engine.py  — MockPolicyEngine: modeled per-stage latency (§6/§7)
-  * robolab.py — modeled RoboLab task success (the real gate runs Isaac Sim, §4 Job 3)
+  * engine.py  — MockPolicyEngine: modeled per-stage latency
+  * robolab.py — modeled RoboLab task success (the real gate runs Isaac Sim, Job 3)
 """

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Job 5 — aggregation (specification_revised.txt §4), run LOCALLY. Replaces the retired
+# Aggregation, run LOCALLY. Replaces the retired
 # jobs/job5-aggregate.sky.yaml: aggregation is CPU-only (pandas/pyarrow/matplotlib over the
 # latency logs), so it needs no cloud node at all.
 #

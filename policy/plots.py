@@ -1,9 +1,9 @@
-"""Figures (specification_revised.txt §2 required outputs 2-4, §3).
+"""Figures (required outputs).
 
   plot_waterfall          Native PyTorch (P0-P3) / end-to-end (E0-E4)
                           contribution waterfalls — descending staircase, marginal %
                           drop per rung, 95% bootstrap CI whiskers.
-  plot_stage_breakdown    Baseline vs final stacked stage composition (the six §3 stages).
+  plot_stage_breakdown    Baseline vs final stacked stage composition (the six stages).
   plot_quality_comparison Lossy FP8 rung — speedup + gate verdict + drift.
 
 Style mirrors the repo's prior figures (Agg backend, sequential blue palette, dpi=150).
@@ -84,7 +84,7 @@ def plot_waterfall(data: dict, out_path: str | Path, title: str | None = None) -
 
 
 def plot_stage_breakdown(data: dict, out_path: str | Path, title: str | None = None) -> Path:
-    """Baseline vs final: stacked composition across the six §3 stages."""
+    """Baseline vs final: stacked composition across the six stages."""
     from policy.configs import STAGES
     cols = [("baseline", data["baseline_cid"], data["baseline"]),
             ("final", data["final_cid"], data["final"])]

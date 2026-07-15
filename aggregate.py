@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Aggregation (specification_revised.txt §4 Job 5).
+"""Aggregation.
 
 A small CPU job that merges every per-configuration output and generates CSV/Parquet
 summaries, the three waterfalls (reasoner/generator/end-to-end), the baseline-vs-final

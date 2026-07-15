@@ -1,11 +1,11 @@
-"""Modeled latency engine (MOCK backend — specification_revised.txt §6).
+"""Modeled latency engine (MOCK backend).
 
-`MockPolicyEngine` models each §6 stage from the config's `stage_multipliers` so the whole
-harness (logs, waterfalls, aggregation) runs with NO GPU / NO model. Anchored to the §7
+`MockPolicyEngine` models each stage from the config's `stage_multipliers` so the whole
+harness (logs, waterfalls, aggregation) runs with NO GPU / NO model. Anchored to the
 example log (server_total ~175 ms at the generator baseline). Deterministic per request
 seed -> reproducible p50/p90/p99. The real path lives in policy/pipeline.py.
 
-Stage model (eager baseline, once per observation). Per-stage costs are anchored to the §7
+Stage model (eager baseline, once per observation). Per-stage costs are anchored to the
 example log; the denoising loop runs the Cosmos3-Nano-Policy-DROID sampling recipe
 (configs.GENERATOR_SAMPLING: steps=4, guidance=3, shift=5, full-range CFG Null), so it is 4
 steps — not the 20 of the spec's illustrative example row:
@@ -31,7 +31,7 @@ from policy.configs import N_DENOISE_STEPS, Config
 from policy.dataset import DroidRequest
 from policy.measure import LatencyRecord
 
-# ---- Eager-baseline stage costs (ms), anchored to the §7 example log --------------
+# ---- Eager-baseline stage costs (ms), anchored to the example log --------------
 BASE = {
     "preprocess": 7.1,
     "h2d": 1.2,
@@ -44,11 +44,11 @@ BASE = {
 }
 BASELINE_PEAK_MEMORY_MB = 43120.0
 # Fraction of the reasoner conditioning that the naive path recomputes per denoising step.
-# 1.0 == the whole conditioning is recomputed every step (the literal §3 baseline that the
+# 1.0 == the whole conditioning is recomputed every step (the literal baseline that the
 # reasoner-conditioning-cache removes). Tune from the on-box eager trace.
 REASONER_RECOMPUTE_FRACTION = 1.0
 # Modeled action drift for the lossy techniques (Cache-DiT, FP8), vs the eager output.
-# Below the gate threshold -> "passed" (the RoboLab subset makes the real call, §5/§9).
+# Below the gate threshold -> "passed" (the RoboLab subset makes the real call).
 # _LOSSY_DRIFT is a mock-simulator anchor (stays in code); the gate THRESHOLD is a run
 # parameter from the single config file (config/experiment.yaml -> quality_gate).
 _LOSSY_DRIFT = {"cache_dit": 0.006, "quantization": 0.011}   # normalized action-MSE
@@ -111,12 +111,12 @@ class MockPolicyEngine:
         c = self.config
         mult = c.stage_multipliers
         # Process-STABLE seed (not builtin hash(): that is PYTHONHASHSEED-randomized, which
-        # would make two runs of the same config in different subprocesses disagree — §10
+        # would make two runs of the same config in different subprocesses disagree; the run
         # requires reproducible logs).
         rng = random.Random(req.seed ^ zlib.crc32(c.cid.encode()))
 
         def stage(base: float, key: str) -> float:
-            # jitter is deterministic in the request seed (reproducible percentiles, §10)
+            # jitter is deterministic in the request seed (reproducible percentiles)
             jitter = 1.0 + (rng.random() - 0.5) * 0.06           # +/-3%
             return base / mult.get(key, 1.0) * jitter
 

@@ -1,9 +1,9 @@
-"""Capture a REAL DROID replay set for latency measurement (specification_revised.txt §5).
+"""Capture a REAL DROID replay set for latency measurement.
 
 Pulls N real observations from the open DROID dataset (Khazatsky et al. 2024) and writes them
 to disk + a manifest that `policy.dataset.load_manifest` reads — so the REAL run (Jobs 1 & 2)
 replays genuine robot observations instead of the synthetic `policy/mock/manifest.json`. Both
-jobs stage this ONE manifest, so their inputs are identical (comparability, §5/§8).
+jobs stage this ONE manifest, so their inputs are identical (comparability).
 
 DROID is exactly the observation format Cosmos3-Nano-Policy-DROID consumes. We capture the
 three RGB views the policy's RoBoArena concat view is built from (`wrist_image_left` +
@@ -54,7 +54,7 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
     """Pull `n` real DROID observations -> per-obs .npz tensors + a manifest at out_dir.
 
     Deterministic (fixed episode/step stride + seed) so the captured set is reproducible and
-    IDENTICAL across Jobs 1 & 2 (§5/§8). Static-shape requirement (§9): observations whose
+    IDENTICAL across Jobs 1 & 2. Static-shape requirement: observations whose
     image resolution differs from the first kept one are skipped (CUDA-graph rungs need a
     single bucketed shape) — logged so the drop is not silent."""
     import os
@@ -91,14 +91,14 @@ def capture_droid(n: int = FIXTURE_SIZE, out_dir: str | Path = "data/replay_real
             wrist = obs[_WRIST_KEY].numpy()
             joint = np.reshape(obs[_JOINT_KEY].numpy(), -1)      # (7,)
             gripper = np.reshape(obs[_GRIPPER_KEY].numpy(), -1)  # (1,)
-            proprio = np.concatenate([joint, gripper]).astype("float32")   # 8-D (§1)
+            proprio = np.concatenate([joint, gripper]).astype("float32")   # 8-D
             instr = step[_INSTR_KEY].numpy()
             instr = instr.decode("utf-8") if isinstance(instr, bytes) else str(instr)
 
             hw = tuple(int(x) for x in ext.shape[:2])
             if ref_hw is None:
                 ref_hw = hw
-            if hw != ref_hw:                        # static shapes only (§9)
+            if hw != ref_hw:                        # static shapes only
                 skipped += 1
                 step_idx += 1
                 continue

@@ -1,4 +1,4 @@
-"""Aggregation job (specification_revised.txt §4 Job 5, §2 required outputs).
+"""Aggregation job (required outputs).
 
 A small CPU job that merges every per-configuration subprocess output and generates:
 
@@ -6,11 +6,11 @@ A small CPU job that merges every per-configuration subprocess output and genera
   * Waterfall data — native PyTorch (P0-P3), end-to-end vLLM (E0-E4),
     each with cumulative (vs baseline) and marginal (vs prev) speedups
   * Confidence intervals (numpy bootstrap over the raw per-request samples)
-  * Stage breakdown for baseline and final (the six §3 stages)
+  * Stage breakdown for baseline and final (the six stages)
   * Quality-comparison tables (the lossy Cache-DiT / FP8 gate)
   * Figures (policy/plots.py)
 
-Reads only the JSONL + summary.json each subprocess wrote (§7); no GPU needed.
+Reads only the JSONL + summary.json each subprocess wrote; no GPU needed.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ WATERFALL_METRIC = {
     END_TO_END: ("total_chunk_ms", "vLLM stack: observation → 32-action chunk (ms)"),
 }
 
-# JSONL latency_ms block -> the six §3 stage-breakdown buckets.
+# JSONL latency_ms block -> the six stage-breakdown buckets.
 STAGE_BUCKETS = {
     "preprocess": ("preprocess", "h2d"),
     "reasoner_conditioning": ("reasoner",),
@@ -140,7 +140,7 @@ def build_waterfall(results: dict[str, ConfigResult], waterfall: str) -> dict:
 
 
 def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
-    """Baseline vs final per-stage p50 — the §3 stage breakdown. Prefers the E ladder (E0 vs final);
+    """Baseline vs final per-stage p50 — the stage breakdown. Prefers the E ladder (E0 vs final);
     a native-only run (P configs, e.g. Job 1) falls back to the P ladder instead of emitting {}."""
     rungs = next((r for r in ([c for c in ladder(wf) if c.cid in results] for wf in (END_TO_END, NATIVE)) if r), None)
     if not rungs:
@@ -161,7 +161,7 @@ def build_stage_breakdown(results: dict[str, ConfigResult]) -> dict:
         "baseline": b, "final": f,
         "baseline_total_ms": round(sum(b.values()), 3),
         "final_total_ms": round(sum(f.values()), 3),
-        "reconciles": True,   # mock: stages sum to server+transport by construction (§4 acceptance ≤5%)
+        "reconciles": True,   # mock: stages sum to server+transport by construction (acceptance ≤5%)
     }
 
 
@@ -282,7 +282,7 @@ def aggregate(out_dir: str | Path, *, make_plots: bool = True) -> dict:
 
 
 def _acceptance(waterfalls: dict, quality: dict) -> dict:
-    """The §10 final-acceptance checklist evaluated from the aggregated numbers."""
+    """The final-acceptance checklist evaluated from the aggregated numbers."""
     e2e = waterfalls.get(END_TO_END)
     checks = {}
     if e2e and e2e["rungs"]:

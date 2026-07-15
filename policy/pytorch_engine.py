@@ -1,17 +1,17 @@
-"""Native PyTorch reference backend (Cosmos 3 report §5.3.1) via cosmos_framework.
+"""Native PyTorch reference backend (Cosmos 3 report) via cosmos_framework.
 
 Reuses `cosmos_framework.scripts.action_policy_server_robolab.RobolabPolicyService` — the
 reference DROID policy inference — for model loading, the observation transform, and the single
 `generate_samples_from_batch` call. We drive it per replay request and time it with CUDA events.
 
-Per-stage split (§3): inference is ONE call, so we register forward hooks on the reasoner tower
+Per-stage split: inference is ONE call, so we register forward hooks on the reasoner tower
 + the diffusion denoiser submodules to split the call into reasoner_ms / denoising_ms. Hooks
 fire in eager/compile mode; under CUDA-graph *replay* they are opaque, so for the cuda_graphs
 rungs the split collapses into denoising_ms and only the end-to-end latency is exact.
 
-§5.3.1 optimization flags map to the OmniSetup at LOAD time: torch.compile -> use_torch_compile,
+Optimization flags map to the OmniSetup at LOAD time: torch.compile -> use_torch_compile,
 CUDA graphs -> use_cuda_graphs (injected via a RobolabServerArgs subclass since the stock server
-does not expose them). FP8 + Cache-DiT are vLLM-Omni-only (§5.3.3) -> those configs route to the
+does not expose them). FP8 + Cache-DiT are vLLM-Omni-only -> those configs route to the
 vllm backend (policy/compat.resolve_backend), never here.
 
 Attention is fixed to cuDNN *fused* attention (flash-class) here: cosmos_framework's dispatcher
@@ -32,7 +32,7 @@ from policy.configs import ACTION_CHUNK, GENERATOR_SAMPLING, Config
 from policy.dataset import DroidRequest
 from policy.measure import LatencyRecord
 
-_ACTION_T, _ACTION_D = ACTION_CHUNK        # 32 x 8 (§1)
+_ACTION_T, _ACTION_D = ACTION_CHUNK        # 32 x 8
 
 # Submodule attribute names to time (VERIFY: print [n for n,_ in model.named_children()] on-box).
 _REASONER_CANDIDATES = ("reasoner", "reasoner_tower", "text_encoder", "vlm", "llm")
@@ -41,7 +41,7 @@ _DENOISER_CANDIDATES = ("denoiser", "dit", "net", "generator", "diffusion_model"
 
 class _StageHooks:
     """Time named submodules via forward hooks + CUDA events so one generate_samples_from_batch
-    call yields the reasoner/denoiser split (§3). Eager/compile only — graph replay is opaque."""
+    call yields the reasoner/denoiser split. Eager/compile only — graph replay is opaque."""
 
     def __init__(self):
         self._handles: list = []
@@ -82,7 +82,7 @@ def _find(model, names):
 
 
 def _build_service(checkpoint: str, config: Config, gen):
-    """RobolabPolicyService subclassed to inject the §5.3.1 compile / CUDA-graph flags."""
+    """RobolabPolicyService subclassed to inject the compile / CUDA-graph flags."""
     from cosmos_framework.inference.args import OmniSetupOverrides                       # VERIFY
     from cosmos_framework.scripts.action_policy_server_robolab import (                  # VERIFY
         _DEFAULT_ROBOLAB_OUTPUT_DIR,
@@ -104,10 +104,10 @@ def _build_service(checkpoint: str, config: Config, gen):
                 "output_dir": args.output_dir or _DEFAULT_ROBOLAB_OUTPUT_DIR,
                 "sampler": args.sampler,
                 # Skip the gated nvidia/Cosmos-Guardrail1 download — the safety guardrail is a
-                # content filter, not part of action-policy latency (§3 excludes it).
+                # content filter, not part of action-policy latency (excluded).
                 "guardrails": False,
-                "use_torch_compile": compile_,      # §5.3.1 torch.compile (cosmos default is True!)
-                "use_cuda_graphs": graphs,          # §5.3.1 CUDA-graph replay
+                "use_torch_compile": compile_,      # torch.compile (cosmos default is True!)
+                "use_cuda_graphs": graphs,          # CUDA-graph replay
             }
             setup = OmniSetupOverrides.model_validate(overrides).build_setup()
             return disable_runtime_ema_for_frozen_config(setup)
@@ -121,13 +121,13 @@ def _build_service(checkpoint: str, config: Config, gen):
 
 
 class PyTorchPolicyEngine:
-    """Native eager-PyTorch reference path (§5.3.1) via cosmos_framework. Backend id: 'pytorch'."""
+    """Native eager-PyTorch reference path via cosmos_framework. Backend id: 'pytorch'."""
 
     backend = "pytorch"
 
     def __init__(self, config: Config, *, model: str | None = None,
                  checkpoint_dir: str | None = None, **_):
-        compat.validate(config, "pytorch")           # refuse Cache-DiT/FP8 (§5.3.3)
+        compat.validate(config, "pytorch")           # refuse Cache-DiT/FP8
         self.config = config
         self.checkpoint = checkpoint_dir or model or "nvidia/Cosmos3-Nano-Policy-DROID"
         self._svc = None
@@ -140,7 +140,7 @@ class PyTorchPolicyEngine:
 
         import torch
 
-        # Attention backend (§5.3.1). cosmos_framework's dispatcher has no math/SDPA backend —
+        # Attention backend. cosmos_framework's dispatcher has no math/SDPA backend —
         # only fused kernels — so the reference baseline is torch-native cuDNN *fused* attention
         # (flash-class), which needs no flash_attn build (only cuDNN >= 9.22 in the torch runtime).
         # I4_ATTN_BACKENDS is read at attention-call time, so setting it before the model runs is
@@ -259,7 +259,7 @@ class PyTorchPolicyEngine:
 
 def _action_checksum(action) -> str:
     """Checksum of the (32,8) action chunk, rounded to tolerate compile/kernel FP noise so
-    lossless rungs (compile/graphs) match the eager baseline (§10)."""
+    lossless rungs (compile/graphs) match the eager baseline."""
     import numpy as np
     a = np.round(np.asarray(action, dtype="float64"), 3)
     return hashlib.sha1(a.tobytes()).hexdigest()[:16]

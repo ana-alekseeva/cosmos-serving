@@ -1,4 +1,4 @@
-"""Synthetic replay-set generator (MOCK — specification_revised.txt §5).
+"""Synthetic replay-set generator (MOCK).
 
 Produces the committed `policy/mock/manifest.json` fixture so the harness has a fixed,
 reproducible replay set to run against with no GPU and no real captures. The RUNTIME never
@@ -27,7 +27,7 @@ from policy.dataset import (
     write_manifest,
 )
 
-DEFAULT_REPLAY_SEED = CONFIG.dataset.replay_seed   # deterministic -> reproducible logs (§10)
+DEFAULT_REPLAY_SEED = CONFIG.dataset.replay_seed   # deterministic -> reproducible logs
 FIXTURE_SIZE = 50                                  # unique observations in the committed fixture
 # The committed synthetic fixture lives next to this generator (policy/mock/manifest.json),
 # so it reads as mock data — not a real dataset. The on-box run stages a manifest to the
@@ -57,9 +57,9 @@ def build_mock_replay(n: int = DEFAULT_REPLAY_SIZE, *,
                       seed: int = DEFAULT_REPLAY_SEED) -> list[DroidRequest]:
     """Deterministic synthetic replay set of `n` unique requests across tasks/episodes.
 
-    Shapes are constant (static-shape requirement, §9); task/episode/instruction vary so
-    the set is representative of real preprocessing, prompt lengths, and memory layouts
-    (§5). Deterministic in `seed` so the committed fixture is reproducible (§10)."""
+    Shapes are constant (static-shape requirement); task/episode/instruction vary so
+    the set is representative of real preprocessing, prompt lengths, and memory layouts.
+    Deterministic in `seed` so the committed fixture is reproducible."""
     rng = random.Random(seed)
     reqs: list[DroidRequest] = []
     tasks = [f"RoboLab-{g}-{d}-{t}" for g in CAPABILITY_GROUPS

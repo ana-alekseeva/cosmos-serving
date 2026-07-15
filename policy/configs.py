@@ -1,4 +1,4 @@
-"""The optimization configuration matrix (specification_revised.txt §3).
+"""The optimization configuration matrix.
 
 Three waterfalls, all single-GPU, batch size 1:
 
@@ -19,12 +19,12 @@ exactly the union the spec lists:
       -> Reasoner conditioning cache -> Cache-DiT -> FP8 -> Final
 
 Multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel) are deliberately NOT on
-these ladders — the spec runs them as a separate experiment (§3, policy/multigpu.py).
+these ladders — the spec runs them as a separate experiment (policy/multigpu.py).
 
 `stage_multipliers` / `stage_flags` drive the two backends:
   - MockPolicyEngine reads `stage_multipliers` to model per-stage latency with no GPU.
   - The real vLLM/vLLM-Omni + eager path reads `stage_flags` (engine/attention/compile
-    knobs). Numbers are anchored to the report where it gives them and to the §7 example
+    knobs). Numbers are anchored to the report where it gives them and to the example
     log; the real backend measures wall-clock and overwrites the model.
 """
 from __future__ import annotations
@@ -38,12 +38,12 @@ from policy.config import (  # single source of truth (experiment.yaml)
 )
 
 # ---------------------------------------------------------------------------
-# Pipeline stages (specification_revised.txt §3 stage breakdown / §6 fields).
+# Pipeline stages (stage breakdown / latency fields).
 # ---------------------------------------------------------------------------
 # Two waterfalls. The old reasoner (R) and generator (G) ladders both measured the SAME single
 # MoT inference (Cosmos3VFMNetwork — one net forward), so on-box they produced identical numbers;
-# they are merged into ONE native-PyTorch reference ladder P (§5.3.1). E is the end-to-end vLLM
-# ladder (§5.3.2/§5.3.3).
+# they are merged into ONE native-PyTorch reference ladder P. E is the end-to-end vLLM
+# ladder.
 NATIVE = "native"
 END_TO_END = "end_to_end"
 WATERFALLS = (NATIVE, END_TO_END)
@@ -58,7 +58,7 @@ STAGES = (
     "transport",             # client/server communication
 )
 
-# Fixed action-chunk geometry — the only evaluated task (§1): 32 timesteps x 8 DoF.
+# Fixed action-chunk geometry — the only evaluated task: 32 timesteps x 8 DoF.
 ACTION_CHUNK = CONFIG.dataset.action_chunk
 
 # Sampling recipes — from the single config file. The dataclasses are re-exported so callers
@@ -67,7 +67,7 @@ REASONER_SAMPLING = CONFIG.reasoner_sampling      # Qwen3-VL conditioning decode
 GENERATOR_SAMPLING = CONFIG.generator_sampling    # action-diffusion recipe
 
 # Diffusion steps for one action-denoising trajectory = the sampling recipe's step count.
-# Static (§9 "static shapes") so CUDA-graph configs can capture the loop; denoising_step_ms
+# Static ("static shapes") so CUDA-graph configs can capture the loop; denoising_step_ms
 # is an array of this length.
 N_DENOISE_STEPS = GENERATOR_SAMPLING.steps
 
@@ -80,7 +80,7 @@ class Config:
     label: str                     # human label for tables/plots
     index: int                     # position on its ladder (0 = baseline)
     added: str                     # the single technique this rung adds ("" for baseline)
-    lossy: bool = False            # True -> quality-gated (Cache-DiT, FP8): §3, §9
+    lossy: bool = False            # True -> quality-gated (Cache-DiT, FP8)
     stage_flags: dict = field(default_factory=dict)     # real-backend knobs (eager + vLLM-Omni)
     stage_multipliers: dict = field(default_factory=dict)  # mock: stage -> speedup divisor (>1 faster)
     reasoner_cached: bool = False  # conditioning computed once/observation vs recomputed per step
@@ -97,12 +97,12 @@ class Config:
 #   - torch.compile: kernel fusion + less host overhead (~1.12-1.15).
 #   - CUDA graph replay: removes per-launch overhead; big when the loop is many small
 #     kernels (denoise ~1.15), modest on the VLM prefill (~1.10). Not double-counted with
-#     compile — measured as the *additional* drop over compile (§9).
+#     compile — measured as the *additional* drop over compile.
 #   - Reasoner conditioning cache (P3 / E4): conditioning is invariant across the denoising
 #     trajectory, so compute it ONCE per observation instead of every step. In the naive
 #     baseline the conditioning is recomputed each of N_DENOISE_STEPS steps; caching removes
 #     the (N-1)x. Modeled by `reasoner_cached` (see policy/pipeline.py). Must be invalidated
-#     per new observation (§3).
+#     per new observation.
 #   - Cache-DiT (E5, lossy): reuse cached DiT block outputs across adjacent steps ->
 #     fewer effective step-compute (~1.40 on the denoise loop).
 #   - FP8 (E6, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
@@ -125,11 +125,11 @@ def _mul(d: dict, stage: str, factor: float) -> None:
 
 
 # ---- Native-PyTorch reference waterfall: P0 -> P3 ---------------------------------
-# ONE ladder for the native path (§5.3.1). The old reasoner (R) + generator (G) ladders ran the
+# ONE ladder for the native path. The old reasoner (R) + generator (G) ladders ran the
 # SAME single MoT inference (Cosmos3VFMNetwork) and gave identical on-box numbers, so they are
 # merged here. cuDNN fused-attention baseline (no math / "+Flash" rung — the framework has no math
 # backend); each rung CUMULATIVELY adds one native technique. Cache-DiT + FP8 are vLLM-Omni-only
-# (§5.3.3) and live on the E ladder — keeping them off P avoids a mid-waterfall backend switch.
+# and live on the E ladder — keeping them off P avoids a mid-waterfall backend switch.
 def _native_ladder() -> list[Config]:
     mr: dict = {}   # reasoner_conditioning multipliers
     mg: dict = {}   # generator (prepare + denoise) multipliers
@@ -163,7 +163,7 @@ def _native_ladder() -> list[Config]:
 
 
 # ---- End-to-end cumulative waterfall: E0 -> E4 ------------------------------------
-# Applied across BOTH towers cumulatively (§3): Baseline eager -> Flash -> compile ->
+# Applied across BOTH towers cumulatively: Baseline eager -> Flash -> compile ->
 # CUDA graphs -> FP8 -> Final. Two rungs were REMOVED after the H100 Job 2 measurements
 # (2026-07-15):
 #   * Cache-DiT: its warmup window (W=4) equals the whole 4-step schedule so the cache

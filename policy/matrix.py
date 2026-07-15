@@ -1,7 +1,7 @@
-"""PyTorch ablation matrix orchestrator (specification_revised.txt §4 Job 1, §8).
+"""PyTorch ablation matrix orchestrator (Job 1).
 
 Runs every single-GPU configuration (P0-P3, E0-E6) as an isolated subprocess so
-each releases its CUDA context before the next starts (§4). Applies the §8 bias controls
+each releases its CUDA context before the next starts. Applies the bias controls
 for one long provisioned job:
 
     Baseline (E0)
@@ -42,7 +42,7 @@ def _p50_chunk(summary_path: Path) -> float | None:
 
 def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool,
                backend: str) -> None:
-    """Run one configuration in its own process (releases CUDA context on exit, §4)."""
+    """Run one configuration in its own process (releases CUDA context on exit)."""
     cmd = [
         sys.executable, str(REPO_ROOT / "run_configuration.py"),
         "--configuration", cid,
@@ -65,11 +65,11 @@ def _spawn_one(cid: str, exp: Experiment, out_subdir: str, is_baseline: bool,
 
 
 def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
-    """Run the full ablation matrix with §8 bias controls. Returns the matrix status dict."""
-    requests = load_requests(exp)                       # stage inputs locally before timing (§8)
-    # Route each config to its serving backend (§5.3): the end-to-end (E) waterfall — and the
-    # Cache-DiT/FP8 rungs — run on vLLM/vLLM-Omni (§5.3.2/§5.3.3); the R/G native rungs run on
-    # the PyTorch reference (§5.3.1). A mock run keeps everything modeled.
+    """Run the full ablation matrix with bias controls. Returns the matrix status dict."""
+    requests = load_requests(exp)                       # stage inputs locally before timing
+    # Route each config to its serving backend: the end-to-end (E) waterfall — and the
+    # Cache-DiT/FP8 rungs — run on vLLM/vLLM-Omni; the R/G native rungs run on
+    # the PyTorch reference. A mock run keeps everything modeled.
     all_cfgs = resolve_configs(exp.configurations)
     cfg_backend = {c.cid: compat.resolve_backend(c, exp.backend) for c in all_cfgs}
     configs = [c for c in all_cfgs if compat.supported(c, cfg_backend[c.cid])]
@@ -88,7 +88,7 @@ def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
     base_cid = baseline_id(END_TO_END)                  # E0 — the combined-pipeline baseline
     have_base = any(c.cid == base_cid for c in configs)
 
-    # Order (§8): baseline first, matrix randomized, baseline repeated.
+    # Order: baseline first, matrix randomized, baseline repeated.
     middle = [c.cid for c in configs]
     if exp.randomize_order:
         random.Random(exp.order_seed).shuffle(middle)
@@ -121,7 +121,7 @@ def run_matrix(exp: Experiment, *, spawn: bool = True) -> dict:
             failed.append((cid, str(exc)[:400]))
             print(f"  !! {cid} FAILED: {str(exc)[:200]}", flush=True)
         if i < len(plan) - 1 and exp.wait_between_seconds:
-            time.sleep(exp.wait_between_seconds)        # let the GPU settle between configs (§8)
+            time.sleep(exp.wait_between_seconds)        # let the GPU settle between configs
 
     status = _finish(exp, out_dir, base_cid, have_base, ran, failed, skipped)
     status["config_backends"] = {c.cid: cfg_backend[c.cid] for c in configs}   # which ran where

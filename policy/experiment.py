@@ -28,19 +28,19 @@ class Experiment:
     endpoint: str | None = _R.endpoint           # vllm: externally-deployed endpoint URL
 
     input_manifest: str = _R.input_manifest
-    replay_size: int = _D.replay_size            # dataset section (the fixed replay set, §5)
+    replay_size: int = _D.replay_size            # dataset section (the fixed replay set)
     replay_seed: int = _D.replay_seed
 
     output_dir: str = _R.output_dir
-    torchinductor_root: str = _R.torchinductor_root   # per-config subdir (§4)
+    torchinductor_root: str = _R.torchinductor_root   # per-config subdir
 
-    warmup_requests: int = _M.warmup_requests         # measurement section (§6)
+    warmup_requests: int = _M.warmup_requests         # measurement section
     min_measured_requests: int = _M.min_measured_requests
 
     # configurations to run (cids). Empty -> the full matrix (P0-P3, E0-E6).
     configurations: list = field(default_factory=lambda: list(_R.configurations))
 
-    # §8 bias controls for the single long job.
+    # bias controls for the single long job.
     baseline_at_start_and_end: bool = _R.baseline_at_start_and_end
     randomize_order: bool = _R.randomize_order
     order_seed: int = _R.order_seed

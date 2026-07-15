@@ -1,32 +1,32 @@
-# --- Run + §8 bias controls -------------------------------------------------------------
+# --- Run + bias controls -------------------------------------------------------------
 run:
   run_id: cosmos-droid-001
   model: nvidia/Cosmos3-Nano-Policy-DROID
-  checkpoint_dir: /local/model          # weights staged locally before timing (§8)
+  checkpoint_dir: /local/model          # weights staged locally before timing
   backend: mock                         # mock (no GPU) | vllm (on the target inference GPU)
   endpoint: null                        # vllm: externally-deployed endpoint (else launched)
   input_manifest: /local/replay/manifest.json
   output_dir: results
-  torchinductor_root: /tmp/torchinductor   # per-config subdir /tmp/torchinductor/<cid> (§4)
+  torchinductor_root: /tmp/torchinductor   # per-config subdir /tmp/torchinductor/<cid>
   configurations: []                    # cids to run; [] = full matrix (P0-P3, E0-E4)
-  # §8 bias controls for one long provisioned job:
+  # bias controls for one long provisioned job:
   baseline_at_start_and_end: true
   randomize_order: true
   order_seed: 7
   wait_between_seconds: 5.0
   baseline_drift_reject_pct: 10.0       # reject the run if the two E0 baselines differ by more
 
-# --- Dataset: DROID observation shapes (§9 static) + RoboLab quality subset (§5) --------
+# --- Dataset: DROID observation shapes (static) + RoboLab quality subset --------
 dataset:
   camera_views: [exterior, wrist]       # DROID convention: exterior + wrist
   image_hw: [180, 320]                  # per-view RGB fed to the reasoner (VERIFY on-box)
   proprio_dim: 8                        # joint pos/vel + gripper
-  instruction_tokens: 32                # tokenized language-instruction length (bucketed, §9)
-  action_chunk: [32, 8]                 # the only evaluated task (§1): 32 timesteps × 8 DoF
+  instruction_tokens: 32                # tokenized language-instruction length (bucketed)
+  action_chunk: [32, 8]                 # the only evaluated task: 32 timesteps × 8 DoF
   replay_size: 50                       # MEASURED requests/config = the 50 unique real obs, once
                                         # each (no cycling). Solid p50, ok p90; p99 is rough at
                                         # n=50. Raise this to cycle the set for tighter tails.
-  replay_seed: 20260713                 # deterministic → reproducible logs (§10)
+  replay_seed: 20260713                 # deterministic → reproducible logs
   # Stratified subset: 3 capability groups × 3 difficulty × 2 tasks = 18 tasks, 10 eps each.
   # Groups are RoboLab's own attribute families (its task_report.txt): visual (color/
   # semantics/size), relational (spatial/conjunction/counting), procedural (affordance/
@@ -40,11 +40,11 @@ dataset:
 
 # --- Reasoner (Qwen3-VL) conditioning decode params ------------------------------------
 # The Reasoner is measured ONLY as action-policy conditioning; it does NOT generate
-# standalone text (§2). Decoding is deterministic (temperature 0) so conditioning — and the
-# logged action chunk — is reproducible (§10). vLLM SamplingParams; VERIFY values on-box.
+# standalone text. Decoding is deterministic (temperature 0) so conditioning — and the
+# logged action chunk — is reproducible. vLLM SamplingParams; VERIFY values on-box.
 reasoner_sampling:
   max_tokens: 256          # conditioning-token budget per observation (VERIFY on-box)
-  temperature: 0.0         # greedy / deterministic conditioning (reproducible logs, §10)
+  temperature: 0.0         # greedy / deterministic conditioning (reproducible logs)
   top_p: 1.0               # no nucleus truncation (inactive at temperature 0)
   top_k: -1                # disabled (vLLM convention)
   repetition_penalty: 1.0  # none (1.0 == off)
@@ -56,7 +56,7 @@ generator_sampling:
   shift: 5.0              # flow-matching timestep-schedule shift
   cfg_mode: full-range-null   # CFG over the full step range against a null (uncond) branch
 
-# --- Measurement (§6 + latency best practice): batch 1, ~50 warm-ups, p50/p90/p99 --------
+# --- Measurement (latency best practice): batch 1, ~50 warm-ups, p50/p90/p99 --------
 # Warm-ups discarded (CUDA context / compile / autotune / cache). Measured = replay_size (the
 # 50 unique real obs). p50 primary, p90 ok, p99 indicative at n=50.
 measurement:
@@ -64,7 +64,7 @@ measurement:
   min_measured_requests: 50
   percentiles: [50, 90, 99]
 
-# --- Quality gate: lossy-technique (Cache-DiT / FP8) accept/reject thresholds (§9) -------
+# --- Quality gate: lossy-technique (Cache-DiT / FP8) accept/reject thresholds -------
 quality_gate:
   action_mse_threshold: 0.02   # mock action-drift gate (policy/pipeline.py)
   robolab_success_drop: 0.03   # RoboLab-subset success-drop gate (policy/robolab.py)

@@ -1,17 +1,17 @@
-"""Latency measurement (specification_revised.txt §6, §7).
+"""Latency measurement.
 
-`LatencyRecord` carries every field §6 requires, per request:
+`LatencyRecord` carries every measured field, per request:
 
     preprocess_ms h2d_ms reasoner_ms generator_prepare_ms denoising_ms
     denoising_step_ms[] postprocess_ms d2h_ms server_ms transport_ms
     first_action_ms total_chunk_ms peak_memory_mb
 
-Timing rules (§6): CUDA events for GPU stages, monotonic CPU timers for end-to-end,
+Timing rules: CUDA events for GPU stages, monotonic CPU timers for end-to-end,
 batch size 1, ~50 warm-ups, measured = the 50 unique replay obs (once each), p50/p90/p99
 summaries. The mock backend fabricates records from the model; the real backend fills from
 CUDA-event /
 `time.perf_counter` measurements (see policy/pipeline.py). This module owns the record,
-the JSONL row shape (§7), and the p50/p90/p99 rollups.
+the JSONL row shape, and the p50/p90/p99 rollups.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import numpy as np
 
 from policy.config import CONFIG
 
-# §6 measurement counts — from the single config file (config/experiment.yaml -> CONFIG).
+# Measurement counts — from the single config file (config/experiment.yaml -> CONFIG).
 WARMUP_REQUESTS = CONFIG.measurement.warmup_requests            # ~50 warm-ups (discarded)
 MIN_MEASURED_REQUESTS = CONFIG.measurement.min_measured_requests  # = the unique replay set (50)
 PERCENTILES = CONFIG.measurement.percentiles                   # p50, p90, p99 summaries
@@ -31,7 +31,7 @@ PERCENTILES = CONFIG.measurement.percentiles                   # p50, p90, p99 s
 
 @dataclass
 class LatencyRecord:
-    """One measured request. Field names match §6/§7 (the JSONL `latency_ms` block)."""
+    """One measured request. Field names match the JSONL `latency_ms` block."""
     request_id: int
     task: str
     episode_id: int
@@ -53,7 +53,7 @@ class LatencyRecord:
     quality_gate: str = "n/a"         # passed | failed | n/a
 
     def stage_breakdown(self) -> dict:
-        """The six §3 stage-breakdown buckets (preprocess folds h2d; postprocess folds d2h)."""
+        """The six stage-breakdown buckets (preprocess folds h2d; postprocess folds d2h)."""
         return {
             "preprocess": self.preprocess_ms + self.h2d_ms,
             "reasoner_conditioning": self.reasoner_ms,
@@ -64,7 +64,7 @@ class LatencyRecord:
         }
 
     def to_jsonl_row(self, *, run_id: str, configuration: str, engine: str) -> dict:
-        """The §7 minimal log format — one row per request."""
+        """The minimal log format — one row per request."""
         return {
             "run_id": run_id,
             "configuration": configuration,
@@ -111,7 +111,7 @@ def percentiles(values, pcts=PERCENTILES) -> dict:
 
 
 def summarize(records: list[LatencyRecord]) -> dict:
-    """p50/p90/p99 per latency field over all measured requests (§6)."""
+    """p50/p90/p99 per latency field over all measured requests."""
     out = {"n_requests": len(records)}
     for f in SUMMARY_FIELDS:
         out[f] = percentiles([getattr(r, f) for r in records])
@@ -125,7 +125,7 @@ def summarize(records: list[LatencyRecord]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Timing primitives (§6): CUDA events for GPU stages, monotonic timers for E2E.
+# Timing primitives: CUDA events for GPU stages, monotonic timers for E2E.
 # Guarded so the module imports with no torch/CUDA (mock path never calls these).
 # ---------------------------------------------------------------------------
 @contextlib.contextmanager
@@ -140,7 +140,7 @@ def cpu_timer(sink: dict, key: str):
 
 class CudaStageTimer:
     """CUDA-event stage timer (real backend). Records elapsed ms between paired events
-    after a single synchronize, so it does not serialize the stream per stage (§6)."""
+    after a single synchronize, so it does not serialize the stream per stage."""
 
     def __init__(self):
         import torch  # local import: GPU-only path

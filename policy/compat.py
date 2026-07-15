@@ -1,23 +1,23 @@
-"""Technique / backend compatibility (Cosmos 3 report §5.3).
+"""Technique / backend compatibility (Cosmos 3 report).
 
 The report splits the optimizations across two backends, and this module encodes that split
 so a config can only run techniques its backend actually supports:
 
-  * §5.3.1 Plain PyTorch — the modifiable REFERENCE path. Single-GPU latency techniques:
+  * Plain PyTorch — the modifiable REFERENCE path. Single-GPU latency techniques:
       torch.compile, CUDA-graph replay (reduce-overhead), Reasoner-tower caching. Attention is
       fixed to cuDNN fused attention here (no math backend exists in cosmos_framework), so the
-      math-vs-flash "attention" toggle only applies on the vLLM E-ladder (§5.3.3).
-  * §5.3.3 vLLM-Omni — the production Generator runtime. Adds, on top of the above:
+      math-vs-flash "attention" toggle only applies on the vLLM E-ladder.
+  * vLLM-Omni — the production Generator runtime. Adds, on top of the above:
       Cache-DiT and dynamic FP8 quantization (plus multi-GPU / memory features handled
       elsewhere).
 
 So Cache-DiT and FP8 are vLLM-Omni ONLY — the native-PyTorch waterfall stops at the Reasoner
 cache; the FP8 rung (E4) is vLLM-Omni-only. This is the whole point of the waterfall (native
-PyTorch reference) vs. production-validation (vLLM/vLLM-Omni) distinction (§4 Jobs 1 vs 2).
+PyTorch reference) vs. production-validation (vLLM/vLLM-Omni) distinction (Jobs 1 vs 2).
 
-It also records technique pairs that do NOT compose cleanly, so the harness can warn (§9):
+It also records technique pairs that do NOT compose cleanly, so the harness can warn:
 Cache-DiT's data-dependent block-skipping introduces dynamic control flow that breaks static
-CUDA-graph capture — the two must be validated together before being trusted (§9).
+CUDA-graph capture — the two must be validated together before being trusted.
 """
 from __future__ import annotations
 
@@ -31,17 +31,17 @@ TECHNIQUES = {
     "quantization": ("dynamic FP8 quantization", "§5.3.3 (vLLM-Omni)"),
 }
 
-# What each real backend can honor. The native PyTorch reference implements §5.3.1 only;
-# vLLM-Omni adds the §5.3.3 techniques. The mock models the full set (it has no engine).
-_PYTORCH = frozenset({"attention", "compile", "cuda_graphs", "reasoner_cache"})   # §5.3.1
-_VLLM = _PYTORCH | {"cache_dit", "quantization"}                                  # + §5.3.3
+# What each real backend can honor. The native PyTorch reference implements the PyTorch-only
+# techniques; vLLM-Omni adds Cache-DiT + FP8. The mock models the full set (it has no engine).
+_PYTORCH = frozenset({"attention", "compile", "cuda_graphs", "reasoner_cache"})
+_VLLM = _PYTORCH | {"cache_dit", "quantization"}                                  # + Cache-DiT/FP8
 BACKEND_TECHNIQUES = {"pytorch": _PYTORCH, "vllm": _VLLM, "mock": _VLLM}
 
 # FP8 needs FP8 tensor-core hardware (compute capability >= 8.9 Ada / 9.0 Hopper / Blackwell)
-# and kernels; checked at runtime on the vLLM-Omni box (§9 acceptance).
+# and kernels; checked at runtime on the vLLM-Omni box (acceptance).
 FP8_MIN_COMPUTE_CAPABILITY = (8, 9)
 
-# Technique pairs that do not compose cleanly — (frozenset(flags) -> why). §9.
+# Technique pairs that do not compose cleanly — (frozenset(flags) -> why).
 INCOMPATIBLE_PAIRS = {
     frozenset({"cache_dit", "cuda_graphs"}):
         "Cache-DiT skips DiT blocks by a runtime residual-similarity threshold — data-dependent "
@@ -81,7 +81,7 @@ def validate(config, backend: str) -> None:
 
 
 def conflicts(config) -> list[tuple[frozenset, str]]:
-    """Technique pairs present in `config` that do not compose cleanly (§9 warnings)."""
+    """Technique pairs present in `config` that do not compose cleanly (warnings)."""
     flags = {k for k in config.stage_flags if k in TECHNIQUES}
     return [(pair, why) for pair, why in INCOMPATIBLE_PAIRS.items() if pair <= flags]
 
@@ -91,12 +91,12 @@ _END_TO_END = "end_to_end"
 
 
 def resolve_backend(config, run_backend: str) -> str:
-    """Which backend a config actually runs on (Cosmos 3 serving split, §5.3.2/§5.3.3).
+    """Which backend a config actually runs on (Cosmos 3 serving split).
 
     The end-to-end (E) waterfall IS the production stack — vLLM Reasoner + vLLM-Omni Generator
     — so it runs on `vllm`, never the native reference. Any config that needs a vLLM-Omni-only
     technique (Cache-DiT / FP8) also routes there. The component waterfalls (R, G) use the
-    native-PyTorch reference (§5.3.1). A `mock` dry-run keeps everything modeled."""
+    native-PyTorch reference. A `mock` dry-run keeps everything modeled."""
     if run_backend == "mock":
         return "mock"
     if config.waterfall == _END_TO_END or unsupported_flags(config, "pytorch"):

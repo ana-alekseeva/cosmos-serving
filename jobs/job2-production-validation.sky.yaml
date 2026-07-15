@@ -1,4 +1,4 @@
-# Job 2 — production-engine validation (specification_revised.txt §4).
+# Job 2 — production-engine validation.
 #
 # INFRA PROVISIONING ONLY. Validates ONLY the production baseline (E0) and the final optimized
 # configuration (E4, FP8) through the PRODUCTION serving stack — vLLM (Reasoner, Qwen3-VL path) +
@@ -13,7 +13,7 @@ name: cosmos-policy-production
 
 resources:
   cloud: kubernetes
-  accelerators: H200:1              # single-request, batch-1 production latency (§6)
+  accelerators: H200:1              # single-request, batch-1 production latency
   cpus: 16+
   memory: 128+
   image_id: "docker:vllm/vllm-omni:cosmos3"   # VERIFY tag (or split: vllm-only vs vllm-omni image)
@@ -42,7 +42,7 @@ run: |
   : "${HF_TOKEN:?HF_TOKEN required}"
   hf auth login --token "${HF_TOKEN}" --add-to-git-credential || true
   cd cosmos-serving && nvidia-smi
-  # Same real replay set as Job 1 (§8): capture is deterministic, so the 50 DROID observations
+  # Same real replay set as Job 1: capture is deterministic, so the 50 DROID observations
   # are identical here. Production is always real (--backend vllm below).
   mkdir -p /local/replay "${VLLM_TORCH_PROFILER_DIR}"
   uv pip install tensorflow-datasets tensorflow-cpu
