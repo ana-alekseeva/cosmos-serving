@@ -237,6 +237,8 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
         "model": model,
         "prompt": str(obs["instruction"]),
         **request_form_fields(req.seed),            # steps/guidance/shift/seed (fixed, §10)
+        # server-enforced: num_frames == action_chunk_size (or +1) for action requests
+        "num_frames": "32",
         "extra_params": json.dumps({
             "action_mode": "policy",
             "domain_name": "droid_lerobot",         # -> domain_id 8 (EMBODIMENT_TO_DOMAIN_ID)

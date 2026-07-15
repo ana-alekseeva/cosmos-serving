@@ -123,6 +123,7 @@ fields = {
     "guidance_scale": "3",
     "flow_shift": "5",
     "seed": "0",
+    "num_frames": "32",   # server contract: must equal action_chunk_size (or +1)
     "extra_params": json.dumps({
         "action_mode": "policy",
         "domain_name": "droid_lerobot",
