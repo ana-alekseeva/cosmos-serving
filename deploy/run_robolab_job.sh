@@ -22,7 +22,9 @@ export PATH="$HOME/.local/bin:$PATH"
 : "${ROLE:=baseline}"
 : "${EPISODES_PER_TASK:=10}"                 # run_robolab reads this via envvar; 10 = full subset
 : "${SUCCESS_DROP_THRESHOLD:=0.03}"
-: "${OUTPUT_URI:=s3://serverless-challenge/robolab-eval-results/subset/}"
+# Job 3 uploads to OUTPUT_URI_EVAL, NOT OUTPUT_URI — .env's OUTPUT_URI is the Job 2 traces
+# destination (cosmos3-ablation-results/); using it here would mix eval records into Job 2's tree.
+: "${OUTPUT_URI_EVAL:=s3://serverless-challenge/robolab-eval-results/subset/}"
 : "${AWS_ENDPOINT_URL:=https://storage.eu-north1.nebius.cloud}"
 : "${ROBOLAB_PYTHON:=python}"                 # VERIFY: the image's Isaac interpreter (isaaclab.sh -p vs python)
 
@@ -56,7 +58,7 @@ echo "ROLE=$ROLE SIDE=$SIDE episodes=$EPISODES_PER_TASK threshold=$SUCCESS_DROP_
 uv run python run_robolab.py --backend vllm --side "$SIDE" --out-dir results
 
 if command -v aws >/dev/null 2>&1 && [ -d results ]; then
-  aws s3 cp results/ "${OUTPUT_URI}raw/" --recursive --exclude "aggregate/*" --endpoint-url "$AWS_ENDPOINT_URL" || true
-  [ -d results/aggregate ] && aws s3 cp results/aggregate/ "${OUTPUT_URI}" --recursive --endpoint-url "$AWS_ENDPOINT_URL" || true
+  aws s3 cp results/ "${OUTPUT_URI_EVAL}raw/" --recursive --exclude "aggregate/*" --endpoint-url "$AWS_ENDPOINT_URL" || true
+  [ -d results/aggregate ] && aws s3 cp results/aggregate/ "${OUTPUT_URI_EVAL}" --recursive --endpoint-url "$AWS_ENDPOINT_URL" || true
 fi
-echo "DONE role=$ROLE -> ${OUTPUT_URI}raw/robolab/"
+echo "DONE role=$ROLE -> ${OUTPUT_URI_EVAL}raw/robolab/"
