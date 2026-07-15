@@ -25,7 +25,17 @@ export PATH="$WORK/.venv/bin:$PATH"
 mkdir -p "$WORK/rungs"
 
 [ -x "$PY" ] || { echo "run deploy/feasibility_omni.sh first (venv missing)"; exit 1; }
-uv pip install -q --python "$PY" -e "$REPO" || { echo "harness install failed"; exit 1; }
+uv pip install -q --python "$PY" -e "$REPO" iopath || { echo "harness install failed"; exit 1; }
+
+# robot_obs activates the RoboLab path -> lazy cosmos_framework imports. Vendor the clone by
+# PYTHONPATH (mirrors Dockerfile.vllm: vfm->generator symlink shim; iopath installed above).
+FW="$WORK/cosmos-framework"
+[ -d "$FW" ] || git clone --depth 1 https://github.com/NVIDIA/cosmos-framework "$FW"
+[ -e "$FW/cosmos_framework/data/vfm" ] || ln -s generator "$FW/cosmos_framework/data/vfm"
+[ -e "$FW/cosmos_framework/model/vfm" ] || ln -s generator "$FW/cosmos_framework/model/vfm"
+export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$FW"
+"$PY" -c "import cosmos_framework.data.vfm.action.transforms" \
+  || { echo "vendored cosmos_framework import failed"; exit 1; }
 
 # one action request with the VERIFIED robot_obs schema; prints total/stage timing
 cat > "$WORK/rungs/probe.py" <<'PROBE'
