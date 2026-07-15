@@ -128,6 +128,7 @@ fields = {
         "action_mode": "policy",
         "domain_name": "droid_lerobot",
         "action_chunk_size": 32,
+        "raw_action_dim": 8,          # DROID: joint(7) + gripper(1)
     }),
 }
 body = b""

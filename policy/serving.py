@@ -243,6 +243,7 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
             "action_mode": "policy",
             "domain_name": "droid_lerobot",         # -> domain_id 8 (EMBODIMENT_TO_DOMAIN_ID)
             "action_chunk_size": 32,
+            "raw_action_dim": 8,                    # DROID: joint(7) + gripper(1)
             "robot_obs": {                          # VERIFY key names against cosmos3 preprocessing
                 "proprio": [float(x) for x in obs["proprio"]],   # 8-D joint(7)+gripper(1)
                 "wrist_image": base64.b64encode(_png(obs["wrist"])).decode("ascii"),
