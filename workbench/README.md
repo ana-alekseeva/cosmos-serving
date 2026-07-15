@@ -3,8 +3,8 @@
 The npa-workbench (`nebius/nebius-physical-ai`) integration, used **only to provision
 infrastructure** on npa-managed Nebius infra (no resources created by hand):
 
-1. **serverless GPU jobs** that run the repo's ablation / evaluation code on managed GPUs
-   (see [../jobs/](../jobs/) — the five-job plan), and
+1. **serverless GPU jobs** that run the repo's ablation and evaluation code on managed GPUs
+   (see [../jobs/](../jobs/)), and
 2. **a serverless endpoint** serving `Cosmos3-Nano-Policy-DROID` with the ablation-winning
    latency optimizations baked in.
 
@@ -15,7 +15,7 @@ record of *what infra to stand up*.
 
 | File | Role |
 |---|---|
-| [policy-droid.config.yaml](policy-droid.config.yaml) | serve `Cosmos3-Nano-Policy-DROID` serverless with the final E6 optimizations |
+| [policy-droid.config.yaml](policy-droid.config.yaml) | serve `Cosmos3-Nano-Policy-DROID` serverless with the final E4 optimizations |
 | [optimized-deploy.config.yaml](optimized-deploy.config.yaml) | deploy config (equivalent knobs; used by `../jobs/deploy-optimized.sh`) |
 | [../jobs/](../jobs/) | the executable Nebius job specs (SkyPilot + npa.workflow twins + deploy script) |
 
@@ -35,22 +35,24 @@ npa configure --interactive        # ~/.npa/{credentials,config}.yaml: project/t
 ## Create the serverless endpoint (the workbench resource)
 
 `npa workbench cosmos deploy --runtime serverless` creates a Nebius Serverless AI Endpoint for
-the Cosmos container (verified against npa 0.1.0). See [../jobs/README.md](../jobs/README.md) for
-the full runbook; the deploy script wraps the real command:
+the Cosmos container (verified against npa 0.1.0). The repository-level
+[README](../README.md) is the full runbook; the deploy script wraps the real command:
 
 ```bash
 MODE=optimized PROJECT_ALIAS=cosmos HF_TOKEN=$HF_TOKEN bash ../jobs/deploy-optimized.sh
 # then measure it with the repo harness:
-python ../run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E6
+python ../run_matrix.py --backend vllm --endpoint https://<endpoint-url> --configurations E4
 ```
 (The `*.sky.yaml` specs are optional raw-SkyPilot specs for RoboLab on RT-core GPUs, not npa.)
 
 ## Deploy the optimized-model endpoint (serverless)
 
-After Job 1, confirm E6's lossy gate passed (`results/aggregate/quality_comparison.json`), then:
+After the E0-E4 latency run, evaluate E4 with the RoboLab subset. Accept it only when
+`results/aggregate/robolab_subset.json` reports a passing gate, then deploy the retained endpoint:
 
 ```bash
-HF_TOKEN=$HF_TOKEN GPU_PRESET=1gpu-h200 bash ../jobs/deploy-optimized.sh
+HF_TOKEN=$HF_TOKEN GPU_TYPE=gpu-h100-sxm GPU_PRESET=1gpu-16vcpu-200gb \
+  bash ../jobs/deploy-optimized.sh
 # ... point Job 3 (RoboLab subset) at the endpoint, then stop billing:
 npa workbench cosmos -p serverless-challenge -n cosmos-policy teardown --yes
 ```

@@ -29,7 +29,8 @@ aggregate = [
     "pandas>=2.0",
     "pyarrow>=15.0",
 ]
-# GPU / real backend — installed on the H200, not locally (see deploy/setup_gpu.sh).
+# GPU / real backend — supplied by the pinned H100 serving image, not installed locally
+# by this project (see deploy/versions.env and jobs/job2-production-validation.sky.yaml).
 # torch, vllm, vllm-omni are environment-specific; install on-box, not via this extra.
 gpu = [
     "mlflow>=2.14",

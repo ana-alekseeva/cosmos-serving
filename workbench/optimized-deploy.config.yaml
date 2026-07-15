@@ -7,17 +7,16 @@
 deploy:
   runtime: serverless              # managed Nebius AI endpoint — npa provisions the infra
   model: nvidia/Cosmos3-Nano-Policy-DROID
-  gpu_type: gpu-h200-sxm           # VERIFY: `nebius compute platform list`
-  gpu_preset: 1gpu-h200            # single-GPU final (E6); 2gpu-h200 to keep CFG-Parallel (Job 1b)
+  gpu_type: gpu-h100-sxm           # npa GPU_TYPE_DEFAULTS platform id (gpu-h100-sxm | gpu-h200-sxm | gpu-l40s-d | gpu-rtx6000)
+  gpu_preset: 1gpu-16vcpu-200gb    # one-H100 preset
   project: serverless-challenge
   name: cosmos-policy
-  # The final end-to-end configuration (E6). jobs/deploy-optimized.sh maps these to the
-  # vLLM-Omni serve args the deploy passes through (--extra-serve-args).
-  configuration: E6
+  # The final end-to-end configuration (E4), matching policy/serving.py::engine_args(E4).
+  configuration: E4
   engine_args:
-    - --policy-conditioning-cache true       # reasoner conditioning cache (P3/E4)
-    - --cache-backend cache_dit              # Cache-DiT (lossy)
-    - --quantization fp8                     # dynamic FP8 (lossy)
+    - --diffusion-attention-config.per_role.self.backend FLASH_ATTN
+    - --compilation-config '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    - --quantization fp8                     # lossy; gated by the RoboLab subset
 
 test:
   # A DROID action-chunk request (not a text/image prompt): instruction + observation refs.

@@ -52,7 +52,7 @@ class VLLMPolicyEngine:
         # GPU-op traces (the vLLM analogue of the native path's Perfetto traces): serving.py
         # turns VLLM_TORCH_PROFILER_DIR into the --profiler-config engine flag (the env var
         # itself was removed from vllm 0.19.1); traces flush on /stop_profile (capture_profile
-        # below). Point it at a per-config SUBDIR so trace_E0 vs trace_E6 are attributable —
+        # below). Point it at a per-config SUBDIR so trace_E0 vs trace_E4 are attributable —
         # safe to mutate os.environ: each config runs in its own subprocess, and
         # engine_args() reads it at launch time.
         base = os.environ.get("VLLM_TORCH_PROFILER_DIR")

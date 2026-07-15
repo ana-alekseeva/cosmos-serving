@@ -1,19 +1,17 @@
 # Job 2 — production-engine validation.
 #
-# INFRA PROVISIONING ONLY. Validates ONLY the production baseline (E0) and the final optimized
-# configuration (E4, FP8) through the PRODUCTION serving stack — vLLM (Reasoner, Qwen3-VL path) +
-# vLLM-Omni (Generator / full policy). Does NOT repeat the whole ablation matrix; the E-ladder
-# defined in policy/configs.py is E0..E4. Produces the "Production results using vLLM and
-# vLLM-Omni" output.
+# Runs the complete E0-E4 production ladder through vLLM (Reasoner, Qwen3-VL path) and
+# vLLM-Omni (Generator / full policy). Override CONFIGS=E0,E4 only for a cheaper
+# baseline-versus-final validation after the complete ladder has been measured.
 #
 #   sky jobs launch jobs/job2-production-validation.sky.yaml --secret HF_TOKEN \
-#     --env CONFIGS=E0,E4
+#     --env CONFIGS=E0,E1,E2,E3,E4
 
 name: cosmos-policy-production
 
 resources:
   cloud: kubernetes
-  accelerators: H200:1              # single-request, batch-1 production latency
+  accelerators: H100:1              # one H100, single-request batch-1 latency
   cpus: 16+
   memory: 128+
   image_id: "docker:vllm/vllm-omni:cosmos3"   # VERIFY tag (or split: vllm-only vs vllm-omni image)
@@ -24,7 +22,7 @@ envs:
   REPO_URL: "https://github.com/ana-alekseeva/cosmos-serving.git"   # VERIFY
   REPO_REF: "main"
   # MODEL is read from config/experiment.yaml (single source of truth), not an env var.
-  CONFIGS: "E0,E4"                  # production baseline (E0) + final optimized (E4, FP8) ONLY
+  CONFIGS: "E0,E1,E2,E3,E4"        # complete cumulative production ladder
   VLLM_TORCH_PROFILER_DIR: "/local/vllm_traces"   # vLLM writes Chrome traces here on /start_profile
   OUTPUT_URI: "s3://serverless-challenge/cosmos3-ablation-results/production/"
   AWS_ENDPOINT_URL: "https://storage.eu-north1.nebius.cloud"
@@ -48,7 +46,7 @@ run: |
   uv pip install tensorflow-datasets tensorflow-cpu
   uv run python -m policy.capture --n 50 --out /local/replay   # writes /local/replay/manifest.json
 
-  # Production baseline + final ONLY, through the vLLM / vLLM-Omni serving stack.
+  # Complete E0-E4 ladder through the vLLM / vLLM-Omni serving stack.
   uv run python run_matrix.py \
     --input-manifest /local/replay/manifest.json \
     --output-dir results-production \

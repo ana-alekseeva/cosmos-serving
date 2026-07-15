@@ -1,0 +1,32 @@
+# cosmos-droid-vllm:v4 — SERVE variant. A thin layer on the Job-2 benchmark image (v3) that
+# adds a long-lived policy-server ENTRYPOINT, so the SAME verified vLLM-Omni stack can be
+# deployed as an npa SERVERLESS endpoint that RoboLab (Job 3) and the latency harness both hit.
+# v3 already carries the full stack: vllm + vllm-omni (deploy/versions.env pins), cosmos_framework
+# vendored on PYTHONPATH (with data/vfm + model/vfm -> generator symlinks), this repo editable in
+# /opt/omni/.venv. We do NOT reinstall any of it — only add the serve entrypoint + a few leaf deps.
+#
+# Build (context = repo root; wheels are linux/x86_64 -> --platform linux/amd64). Bump the tag
+# EVERY push — a reused tag is served STALE from the k8s node image cache:
+#   REG=cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf
+#   docker build --platform linux/amd64 -f deploy/Dockerfile.serve -t $REG/cosmos-droid-vllm:v4 .
+#   docker push $REG/cosmos-droid-vllm:v4
+ARG BASE=cr.eu-north1.nebius.cloud/e00k6drmprp0pm6zcf/cosmos-droid-vllm:v3
+FROM ${BASE}
+
+# The RoboLab OpenPI serving path imports MORE of cosmos_framework's pure-python action-transform
+# chain (lazy_config -> file_io -> text_tokenizer) than the Job-2 /v1/videos path exercised at
+# build time. Install its leaf UTILITY deps so the websocket route can't 500 on a missing import.
+# Deliberately NO torch/transformers/diffusers/accelerate here — those would fight vllm's pins
+# (vllm-omni 0.24 needs transformers>=5; the framework caps it <5). These leaves pull no torch.
+RUN uv pip install --python /opt/omni/.venv/bin/python --no-cache \
+      iopath omegaconf hydra-core attrs cattrs loguru tyro termcolor \
+      einops msgpack obstore av imageio imageio-ffmpeg nvidia-ml-py \
+    && /opt/omni/.venv/bin/python -c "from cosmos_framework.data.vfm.action.transforms import ActionTransformPipeline; print('action transforms import OK')"
+
+# Serve launcher + entrypoint (small, always taken fresh from the build context).
+COPY deploy/serve_launch.py  /opt/cosmos-serving/deploy/serve_launch.py
+COPY deploy/serve_endpoint.sh /opt/serve_endpoint.sh
+RUN chmod +x /opt/serve_endpoint.sh
+
+EXPOSE 8080
+ENTRYPOINT ["/opt/serve_endpoint.sh"]

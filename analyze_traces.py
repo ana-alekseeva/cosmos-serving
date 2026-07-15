@@ -2,7 +2,7 @@
 """Trace + results analysis figures (report plots beyond aggregate.py's required-output set).
 
 Consumes the matrix results dir (per-config JSONL) plus the job's profiler traces
-(`traces.tar.gz` from ${OUTPUT_URI}raw/, or an extracted directory) and produces:
+(the extracted `traces/` directory downloaded from S3, or an optional tar archive) and produces:
 
   model_parts.png/.csv        which parts of the MODEL are slowest — CUDA time %
                               attributed to components (vision encoder, UND language
@@ -15,7 +15,7 @@ Consumes the matrix results dir (per-config JSONL) plus the job's profiler trace
   denoise_steps.png           per-denoise-step latency, eager baseline vs final rung
   request_timeline.png        latency vs request index (drift/bias-control evidence)
 
-    python analyze_traces.py --results-dir results --traces results/traces.tar.gz
+    python analyze_traces.py --results-dir results --traces results/traces
 """
 from __future__ import annotations
 

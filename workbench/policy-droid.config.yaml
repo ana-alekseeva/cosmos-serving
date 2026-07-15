@@ -13,19 +13,17 @@
 serve:
   model: nvidia/Cosmos3-Nano-Policy-DROID   # https://huggingface.co/nvidia/Cosmos3-Nano-Policy-DROID
   runtime: serverless                        # managed Nebius AI endpoint (npa provisions infra)
-  gpu_type: gpu-h200-sxm                     # VERIFY: nebius compute platform list
-  gpu_preset: 1gpu-h200                      # 1 GPU (single-GPU final E6); 2gpu-h200 to add CFG-Parallel
+  gpu_type: gpu-h100-sxm                     # npa GPU_TYPE_DEFAULTS platform id (gpu-h100-sxm | gpu-h200-sxm | gpu-l40s-d | gpu-rtx6000)
+  gpu_preset: 1gpu-16vcpu-200gb              # one-H100 preset
   project: serverless-challenge
   name: cosmos-policy
-  # The final end-to-end optimized configuration (E6): torch.compile + CUDA graphs +
-  # reasoner-conditioning-cache + Cache-DiT + FP8. On a >=2-GPU preset, add CFG-Parallel
-  # (Job 1b) — a scaling win, not a per-GPU algorithmic one. Baked in as vLLM-Omni serve args
-  # (policy/serving.py::engine_args); jobs/deploy-optimized.sh applies them.
-  configuration: E6
+  # The final end-to-end configuration is E4: FlashAttention + torch.compile + CUDA graphs
+  # + FP8. These are the engine arguments produced by policy/serving.py::engine_args(E4).
+  configuration: E4
   engine_args:
-    - --policy-conditioning-cache true       # reasoner conditioning cache (P3/E4)
-    - --cache-backend cache_dit              # Cache-DiT (lossy — gated by RoboLab subset)
-    - --quantization fp8                     # dynamic FP8 (lossy — gated by RoboLab subset)
+    - --diffusion-attention-config.per_role.self.backend FLASH_ATTN
+    - --compilation-config '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    - --quantization fp8                     # lossy; gated by the RoboLab subset
 
 # Quality guard for this endpoint (RoboLab subset task success, baseline vs optimized) runs as a
 # separate infra job — jobs/job3-robolab-subset.sky.yaml — pointed at this endpoint's URL.

@@ -3,7 +3,7 @@
 Three waterfalls, all single-GPU, batch size 1:
 
   Native-PyTorch reference waterfall  P0 -> P3   (measures `total_chunk_ms`; R+G merged — one MoT)
-  End-to-end cumulative waterfall     E0 -> E6   (measures `total_chunk_ms`, vLLM stack)
+  End-to-end cumulative waterfall     E0 -> E4   (measures `total_chunk_ms`, vLLM stack)
 
 Attention baseline: the native-PyTorch reference path (P) runs on cosmos_framework, whose
 attention dispatcher has NO math/SDPA backend — only fused kernels (flash2/flash3/cuDNN/NATTEN).
@@ -12,11 +12,10 @@ I4_ATTN_BACKENDS=cudnn (policy/pytorch_engine.py); there is no separate math bas
 rung. The math-vs-flash comparison is realizable only on the vLLM E-ladder (E0 TORCH_SDPA -> E1
 FLASH_ATTN, policy/serving.py), which is why it is retained there.
 
-Each rung adds ONE technique to the previous one (cumulative). The end-to-end ladder is
-exactly the union the spec lists:
+Each rung adds one technique to the previous one (cumulative):
 
     Baseline eager -> Flash Attention -> torch.compile -> CUDA graphs
-      -> Reasoner conditioning cache -> Cache-DiT -> FP8 -> Final
+      -> FP8 -> Final
 
 Multi-GPU strategies (CFG-Parallel, Ulysses Context-Parallel) are deliberately NOT on
 these ladders — the spec runs them as a separate experiment (policy/multigpu.py).
@@ -75,7 +74,7 @@ N_DENOISE_STEPS = GENERATOR_SAMPLING.steps
 @dataclass(frozen=True)
 class Config:
     """One rung of a waterfall = one cumulative optimization configuration."""
-    cid: str                       # "P0" ... "P3" ... "E6"
+    cid: str                       # "P0" ... "P3" ... "E4"
     waterfall: str                 # NATIVE | END_TO_END
     label: str                     # human label for tables/plots
     index: int                     # position on its ladder (0 = baseline)
@@ -105,7 +104,7 @@ class Config:
 #     per new observation.
 #   - Cache-DiT (E5, lossy): reuse cached DiT block outputs across adjacent steps ->
 #     fewer effective step-compute (~1.40 on the denoise loop).
-#   - FP8 (E6, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
+#   - FP8 (E4, lossy): dynamic FP8 on the dominant denoise compute (~1.30) + lower
 #     peak memory.
 # ---------------------------------------------------------------------------
 _FLASH_REASONER = 1.30
@@ -229,7 +228,7 @@ def ladder(waterfall: str) -> list[Config]:
 def all_configs() -> list[Config]:
     """Every rung of every ladder — the full single-GPU matrix run by run_matrix.py.
 
-    Order: P0-P3 (native PyTorch), E0-E6 (the combined end-to-end vLLM configurations)."""
+    Order: P0-P3 (native PyTorch), E0-E4 (the combined end-to-end vLLM configurations)."""
     return [*NATIVE_LADDER, *END_TO_END_LADDER]
 
 

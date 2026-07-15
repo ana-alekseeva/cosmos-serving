@@ -37,7 +37,7 @@ class Experiment:
     warmup_requests: int = _M.warmup_requests         # measurement section
     min_measured_requests: int = _M.min_measured_requests
 
-    # configurations to run (cids). Empty -> the full matrix (P0-P3, E0-E6).
+    # configurations to run (cids). Empty -> the full matrix (P0-P3, E0-E4).
     configurations: list = field(default_factory=lambda: list(_R.configurations))
 
     # bias controls for the single long job.
