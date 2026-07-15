@@ -172,6 +172,9 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>
 # cache (IfNotPresent) — this line is how you catch it. Compare against the framework commit
 # your local image reports; if they differ, the node ran an old build: push a FRESH tag.
 echo "PREFLIGHT framework $(git -C "$FRAMEWORK" log -1 --format='%h %cs %s' 2>/dev/null || echo unknown)"
+# The HARNESS code runs from the image (COPY at build), NOT from the injected run_job.sh —
+# compare this against `git rev-parse --short HEAD` locally; mismatch = rebuild the image.
+echo "PREFLIGHT serving-code $(cat "$SERVING/.image_commit" 2>/dev/null || echo unknown)"
 rc=0; "$PYMODEL" /tmp/gemm_probe.py || rc=$?
 # The escalation below is cu13-only (preloads libcublas.so.13): the vllm venv is the cu128
 # stack (cuBLAS 12.8.4.1, known-good) — a GEMM failure there is a node problem, go to abort.

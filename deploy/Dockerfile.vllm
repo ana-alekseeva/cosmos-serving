@@ -24,6 +24,11 @@ ARG COSMOS_FRAMEWORK_REPO=https://github.com/NVIDIA/cosmos-framework
 ARG COSMOS_FRAMEWORK_REF=main
 ARG VLLM_PIN=0.24.0
 ARG OMNI_PIN=0.24.0
+# Stamp which cosmos-serving commit is BAKED into the image (.git is dockerignored, so it
+# must come from the build command). The harness code runs from the image — an image built
+# before a client-side fix silently runs the OLD code (a full matrix burned on stale
+# robot_obs keys taught us this). run_job.sh preflight prints it next to the framework commit.
+ARG SERVING_COMMIT=unknown
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/omni/.venv/bin:/root/.local/bin:${PATH}" \
@@ -43,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt
 COPY . /opt/cosmos-serving
+RUN echo "${SERVING_COMMIT}" > /opt/cosmos-serving/.image_commit
 # vllm-omni 0.24's lazy imports use the framework's OLD package layout (…data.vfm.…,
 # …model.vfm.…); the repo has since renamed vfm -> generator. Symlink the old names onto
 # the new dirs so both dotted paths resolve (no-op if a future ref restores/renames again).
