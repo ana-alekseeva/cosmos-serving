@@ -20,7 +20,6 @@ Remaining `# VERIFY` items are named on-box checks, not guesses.
 """
 from __future__ import annotations
 
-import base64
 import json
 import os
 import subprocess
@@ -225,17 +224,32 @@ def _png(arr) -> bytes:
     return buf.getvalue()
 
 
+def _concat_view(wrist, exterior):
+    """Client-side replica of the server's compose_robolab_views concat_view: wrist on top,
+    two exterior views halved side-by-side below. Our capture has ONE exterior camera, so it
+    stands in for both (documented capture-set limitation; real DROID has two)."""
+    import numpy as np
+    from PIL import Image
+
+    h, w = wrist.shape[0] // 2, wrist.shape[1] // 2
+    half = np.asarray(Image.fromarray(exterior).resize((w, h)), dtype=np.uint8)
+    return np.concatenate([wrist, np.concatenate([half, half], axis=1)], axis=0)
+
+
 def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
     """One DROID observation -> (/v1/videos form fields, input_reference PNG bytes).
 
-    The exterior camera frame is the input_reference file; instruction + Generator recipe
-    are plain form fields; the action plumbing + full robot observation travel in
-    extra_params (merged into the pipeline's extra_args — the same dict the OpenPI
-    websocket path fills). VERIFY on-box: the robot_obs key structure expected by
-    cosmos3's observation preprocessing (wrist camera + 8-D proprio names)."""
+    robot_obs schema VERIFIED against the 0.24.0 pipeline (_build_robolab_policy_inputs):
+    string key 'prompt' (required), 'observation/joint_position' [T,7] and
+    'observation/gripper_position' [T,1] (server inverts to 1-x; use_state defaults true so
+    the last row conditions the action expert). Camera keys are deliberately ABSENT from
+    robot_obs (base64 wouldn't parse — the server wants uint8 arrays): extract_robolab_image
+    then falls back to the request's multi_modal_data.image = our input_reference file, which
+    we send as the composed concat_view PNG (wrist top, exteriors below) — binary, not JSON."""
     from policy.capture import load_capture
 
     obs = load_capture(req.capture_ref)             # real DROID observation (exterior/wrist/proprio)
+    proprio = [float(x) for x in obs["proprio"]]    # 8-D: joint(7) + gripper(1)
     fields = {
         "model": model,
         "prompt": str(obs["instruction"]),
@@ -246,15 +260,15 @@ def build_request_parts(req, model: str) -> tuple[dict[str, str], bytes]:
             "action_mode": "policy",
             "domain_name": "droid_lerobot",         # -> domain_id 8 (EMBODIMENT_TO_DOMAIN_ID)
             "action_chunk_size": 32,
-            "raw_action_dim": 8,                    # DROID: joint(7) + gripper(1)
-            "robot_obs": {                          # VERIFY key names against cosmos3 preprocessing
-                "proprio": [float(x) for x in obs["proprio"]],   # 8-D joint(7)+gripper(1)
-                "wrist_image": base64.b64encode(_png(obs["wrist"])).decode("ascii"),
+            "raw_action_dim": 8,                    # DROID joint_pos space: joint(7)+gripper(1)
+            "robot_obs": {
                 "prompt": str(obs["instruction"]),
+                "observation/joint_position": [proprio[:7]],
+                "observation/gripper_position": [[proprio[7]]],
             },
         }),
     }
-    return fields, _png(obs["exterior"])
+    return fields, _png(_concat_view(obs["wrist"], obs["exterior"]))
 
 
 def _multipart(fields: dict[str, str], file_field: str, filename: str,
