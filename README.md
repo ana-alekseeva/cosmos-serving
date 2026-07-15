@@ -32,13 +32,13 @@ The project follows practical serving and benchmarking best practices: versioned
 
 The configurations are cumulative: each row keeps the techniques introduced above it.
 
-| Configuration | Adds | Effect | Observed change from previous row |
+| Configuration | Adds | Effect |
 |---|---|---|---:|
-| **E0 — baseline** | BF16 eager execution with `TORCH_SDPA` | Establishes the reference serving path. | — |
-| **E1 — FlashAttention** | `FLASH_ATTN` | Avoids materializing the full attention matrix and reduces GPU memory traffic. | **−6%** |
-| **E2 — torch.compile** | Compilation and kernel fusion | Combines small elementwise and normalization operations, reducing launches and intermediate memory traffic. | **−12%** |
-| **E3 — CUDA graphs** | Capture and replay for graph-eligible execution | Reduces CPU launch overhead for repeated execution. | **+1%** |
-| **E4 — FP8** | Dynamic FP8 for supported kernels | Reduces memory traffic and accelerates supported Tensor Core work. It is lossy and must be quality-gated. | **−8%** |
+| **E0 — baseline** | BF16 eager execution with `TORCH_SDPA` | Establishes the reference serving path. |
+| **E1 — FlashAttention** | `FLASH_ATTN` | Avoids materializing the full attention matrix and reduces GPU memory traffic. |
+| **E2 — torch.compile** | Compilation and kernel fusion | Combines small elementwise and normalization operations, reducing launches and intermediate memory traffic. |
+| **E3 — CUDA graphs** | Capture and replay for graph-eligible execution | Reduces CPU launch overhead for repeated execution. | 
+| **E4 — FP8** | Dynamic FP8 for supported kernels | Reduces memory traffic and accelerates supported Tensor Core work. It is lossy and must be quality-gated. | 
 
 This is a shorter list than is common in mature LLM serving stacks. Diffusion inference is
 still an active optimization area: faster samplers, step distillation, feature caching,
@@ -46,18 +46,6 @@ compression, and specialized serving systems are summarized in this
 [survey of efficient diffusion models](https://openreview.net/forum?id=wHECkBOwyt). These
 methods are promising, but they are not yet drop-in, validated options for this Cosmos
 policy and vLLM-Omni serving path.
-
-The benchmark measures batch-one latency for a single robotics-policy request: images are
-inputs, and the output is a `[32, 8]` action chunk—not a generated image or video. Many
-diffusion optimizations instead target media generation, concurrent batching, high
-resolutions, or multi-GPU throughput. Cache-DiT was tested, but it consistently increased
-latency: Cosmos3 already computes the UND pathway once and caches its K/V state, so
-Cache-DiT can skip work only in the GEN layers while still paying for residual checks,
-cache management, and block selection. With only four denoising steps, too little work was
-skipped to recover that overhead ([vLLM-Omni's Cosmos3 Cache-DiT implementation](https://docs.vllm.ai/projects/vllm-omni/en/latest/api/vllm_omni/diffusion/cache/cache_dit_backend/)).
-Batching and distributed parallelism were also outside this one-request, one-H100 latency
-study; they belong in separate throughput and scaling benchmarks. The waterfall therefore
-focuses on basic techniques that could be applied and measured reliably for this workload.
 
 ## Reproduce the benchmark
 
