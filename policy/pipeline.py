@@ -79,20 +79,21 @@ class VLLMPolicyEngine:
         # diffusion-ish -> denoising_ms); finer attribution comes from profiler traces
         # (capture_profile). total_chunk_ms stays client-measured (includes <=25ms poll noise).
         server = float(resp.get("inference_time_s", total_ms / 1e3)) * 1e3
+        # Verified stage_durations keys (0.24.0): queue_wait_ms + stage_N_gen_ms — values
+        # already in ms, ONE omni stage hosting both towers, so no reasoner/denoise split
+        # here (that attribution comes from profiler traces). We fold generation time into
+        # denoising_ms as "the policy forward" and leave finer stages at 0.
         stages = resp.get("stage_durations") or {}
-        reasoner_ms = denoising_ms = 0.0
-        for name, seconds in (stages.items() if isinstance(stages, dict) else []):
-            key = str(name).lower()
-            if "diffusion" in key:
-                denoising_ms += float(seconds) * 1e3
-            elif any(k in key for k in ("ar", "llm", "reason", "text")):
-                reasoner_ms += float(seconds) * 1e3
+        denoising_ms = sum(float(v) for k, v in stages.items()
+                           if str(k).endswith("_gen_ms")) if isinstance(stages, dict) else 0.0
+        # action is a VideoAction object: {data, shape, dtype, raw_action_dim, ...}
         action = resp.get("action", resp.get("actions"))
-        checksum = hashlib.sha256(json.dumps(action).encode()).hexdigest()[:16]
+        action_data = action.get("data") if isinstance(action, dict) else action
+        checksum = hashlib.sha256(json.dumps(action_data).encode()).hexdigest()[:16]
         gate = resp.get("quality_gate", "passed" if not self.config.lossy else "n/a")
         return LatencyRecord(
             request_id=req.request_id, task=req.task, episode_id=req.episode_id,
-            preprocess_ms=0.0, h2d_ms=0.0, reasoner_ms=reasoner_ms,
+            preprocess_ms=0.0, h2d_ms=0.0, reasoner_ms=0.0,
             generator_prepare_ms=0.0, denoising_ms=denoising_ms,
             denoising_step_ms=resp.get("denoising_step_ms", []),
             postprocess_ms=0.0, d2h_ms=0.0,

@@ -160,9 +160,15 @@ try:
           "| peak_memory_mb:", job.get("peak_memory_mb"))
     action = job.get("action") or job.get("actions")
     if action is not None:
-        import numpy as np
-        shape = np.asarray(action).shape
-        print(f"S5 action shape: {shape}")
+        # VideoAction model: {data: nested list, shape: [...], dtype, raw_action_dim, ...}
+        if isinstance(action, dict):
+            shape = tuple(action.get("shape") or [])
+            print("S5 action meta: shape", shape, "dtype", action.get("dtype"),
+                  "mode", action.get("action_mode"), "domain_id", action.get("domain_id"))
+        else:
+            import numpy as np
+            shape = np.asarray(action).shape
+            print(f"S5 action shape: {shape}")
         assert tuple(shape)[-2:] == (32, 8), f"expected [...,32,8], got {shape}"
         print("S5 PASS: action chunk [32, 8] returned")
     else:
