@@ -64,12 +64,17 @@ def engine_args(config: Config) -> list[str]:
     else:
         args += ["--diffusion-attention-config.per_role.self.backend", "TORCH_SDPA"]  # VERIFY value
 
-    # torch.compile / CUDA graphs (vanilla vLLM engine flags — real). Kept distinct so they
-    # are not double-counted (§9): compile without graphs vs compile with graphs.
+    # torch.compile / CUDA graphs, kept distinct so they are not double-counted (§9).
+    # Verified 0.24 semantics: the DIFFUSION tower compiles iff --enforce-eager is ABSENT
+    # (diffusion_model_runner regionally_compiles the transformer; no diffusion cudagraph
+    # knob exists), while --compilation-config governs the AR tower (CompilationMode enum:
+    # NONE/STOCK_TORCH_COMPILE/DYNAMO_TRACE_ONCE/VLLM_COMPILE + cudagraph_mode). So E2 =
+    # compile both towers/no graphs; E3 adds CUDA graphs — AR tower only, by construction.
     if flags.get("cuda_graphs"):
-        args += ["--compilation-config", '{"mode":"reduce-overhead"}']  # VERIFY schema on 0.24
+        args += ["--compilation-config",
+                 '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL_AND_PIECEWISE"}']
     elif flags.get("compile"):
-        args += ["--compilation-config", '{"mode":"default"}']          # compile, no graphs
+        args += ["--compilation-config", '{"mode":"VLLM_COMPILE","cudagraph_mode":"NONE"}']
     else:
         args += ["--enforce-eager"]
 
