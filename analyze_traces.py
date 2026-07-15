@@ -41,19 +41,59 @@ GRID = "#d9d9d9"
 E_ORDER = ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]
 
 # --- model-part attribution (leaf-first, first match wins) -------------------------
-# Patterns target the verified module names in vllm_omni/diffusion/models/cosmos3 and
-# the vendored cosmos_framework; refine with --show-unmatched on real traces.
+# Patterns written against the OBSERVED python_function frame vocabulary in the Job 2
+# traces ("file.py(line): func" / "<built-in ...>" names). Note: under torch.compile the
+# python stack collapses at the compiled-graph boundary, so compiled rungs attribute the
+# fused transformer to the explicit "compiled region" bucket — full component splits are
+# meaningful on the EAGER rungs (E0/E1); kernel_composition covers compiled rungs.
 MODEL_PARTS: list[tuple[str, re.Pattern]] = [
+    # GEMMs deliberately have NO leaf bucket: an aten::mm leaf stays unmatched so the
+    # OWNING module frame above it (nn.Module: Cosmos3GatedMLP_/CausalAttention_...) or the
+    # transformer file frame claims the projection — that's what makes the split meaningful.
+    ("attention (SDPA/FA3 + QKV)", re.compile(
+        r"scaled_dot_product_attention|attention/backends|attention/layer\.py|fa3|flash|fmha"
+        r"|causalattention|crossattention", re.I)),
+    ("RoPE", re.compile(r"_rotate_half|_apply_rotary_pos_emb|rotary", re.I)),
+    ("norms/modulation", re.compile(r"norm\.py|rms_norm|rmsnorm|layer_norm|modulat", re.I)),
+    ("MLP", re.compile(r"silu|gatedmlp|gated_mlp|activation", re.I)),
+    ("VAE", re.compile(r"autoencoder|(^|[^a-z])vae", re.I)),
+    ("vision encoder", re.compile(r"qwen3_vl|vision|visual", re.I)),
     ("guardrail", re.compile(r"guardrail", re.I)),
-    ("vae", re.compile(r"autoencoder|(^|[^a-z])vae", re.I)),
-    ("vision encoder", re.compile(r"vision|visual", re.I)),
-    ("UND language tower", re.compile(r"language_model|und_expert|qwen.*text|embed_prefix", re.I)),
-    ("GEN attention", re.compile(r"crossattention|causalattention|attention|fa3|flash|attn", re.I)),
-    ("GEN MLP", re.compile(r"gatedmlp|(^|[^a-z])mlp", re.I)),
-    ("GEN blocks (other)", re.compile(r"transformer_cosmos3|gendecoderlayer|gen_layers|rotary|rope|timestep|modulat", re.I)),
+    # NB: no pybind11 pattern — FA3's leaf is ALSO a pybind fwd; the pybind frame stays
+    # unmatchable so the frame above it (fa.py wrapper vs dynamo/inductor) decides.
+    ("compiled region (fused transformer)", re.compile(
+        r"_dynamo|_inductor|eval_frame|output_code|cudagraph|cuda_graph|graphs\.py", re.I)),
     ("scheduler/sampling", re.compile(r"unipc|scheduler|denoise_step|sample_actions", re.I)),
-    ("action pre/post", re.compile(r"robolab|pose_utils|action_transform|postprocess", re.I)),
+    ("transformer (other)", re.compile(r"transformer_cosmos3|pipeline_cosmos3|embed|conv", re.I)),
 ]
+
+# transformer_cosmos3.py class line ranges (vllm-omni 0.24.0 — deploy/versions.env pins it):
+# frames name only "file.py(LINE): forward", so class ownership of the projection GEMMs
+# comes from the line number. Ranges = class def line .. next class def - 1.
+_TF_LINE = re.compile(r"transformer_cosmos3\.py\((\d+)\)")
+_TF_LINE_MAP: list[tuple[int, int, str]] = [
+    (44, 53, "norms/modulation"),                    # RMSNorm
+    (152, 195, "transformer (other)"),               # DomainAwareLinear
+    (309, 385, "RoPE"),                              # rotary embedding + helpers
+    (386, 416, "transformer (other)"),               # TimestepEmbedder
+    (417, 460, "MLP"),                               # Cosmos3GatedMLP
+    (461, 735, "attention (SDPA/FA3 + QKV)"),        # Causal + Cross attention
+    (736, 954, "transformer (other)"),               # decoder layers / language model glue
+    (955, 10_000, "transformer (other)"),            # VFMTransformer top level
+]
+
+
+def _frame_part(frame: str) -> str | None:
+    m = _TF_LINE.search(frame)
+    if m:
+        line = int(m.group(1))
+        for lo, hi, part in _TF_LINE_MAP:
+            if lo <= line <= hi:
+                return part
+    for part, pat in MODEL_PARTS:
+        if pat.search(frame):
+            return part
+    return None
 
 KERNEL_CATS: list[tuple[str, re.Pattern]] = [
     ("GEMM", re.compile(r"nvjet|gemm|cublas|splitk|cutlass(?!.*flash)", re.I)),
@@ -109,10 +149,7 @@ def _parse_stacks(path: Path) -> tuple[dict[str, float], list[tuple[str, float]]
         frames = stack.split(";")
         hit = None
         for frame in reversed(frames):          # leaf-first: specific beats generic
-            for name, pat in MODEL_PARTS:
-                if pat.search(frame):
-                    hit = name
-                    break
+            hit = _frame_part(frame)
             if hit:
                 break
         if hit is None:
@@ -123,10 +160,13 @@ def _parse_stacks(path: Path) -> tuple[dict[str, float], list[tuple[str, float]]
     return dict(parts), top_unmatched
 
 
-def _parse_trace_kernels(path: Path) -> dict[str, float]:
+def _load_trace(path: Path) -> list[dict]:
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt", errors="replace") as f:
-        events = json.load(f).get("traceEvents", [])
+        return json.load(f).get("traceEvents", [])
+
+
+def _kernel_shares(events: list[dict]) -> dict[str, float]:
     cats: dict[str, float] = defaultdict(float)
     for ev in events:
         if ev.get("ph") != "X" or "kernel" not in str(ev.get("cat", "")).lower():
@@ -139,6 +179,69 @@ def _parse_trace_kernels(path: Path) -> dict[str, float]:
         else:
             cats["other"] += dur
     return dict(cats)
+
+
+def _model_parts_from_trace(events: list[dict]) -> tuple[dict[str, float], list[tuple[str, float]]]:
+    """Attribute each GPU kernel's time to the python frame stack active at its LAUNCH.
+
+    kernel.args.correlation -> cuda_runtime launch event (CPU tid, ts) -> deepest enclosing
+    python_function frame matching a MODEL_PARTS pattern (timestamp sweep per thread).
+    Fallback for jobs whose stacks_cuda_rank*.txt export came back empty."""
+    launches: dict[int, tuple[int, float]] = {}       # correlation -> (tid, ts)
+    py_by_tid: dict[int, list[tuple[float, float, str]]] = defaultdict(list)
+    kernels: list[tuple[float, str, int]] = []        # (dur, name, correlation)
+    for ev in events:
+        cat = str(ev.get("cat", ""))
+        # cuBLAS launches its kernels via cuda_driver (cuLaunchKernelEx), NOT cuda_runtime —
+        # indexing only cuda_runtime silently drops every GEMM (50-84% of kernel time).
+        if cat in ("cuda_runtime", "cuda_driver"):
+            corr = (ev.get("args") or {}).get("correlation")
+            if corr is not None:
+                launches[corr] = (ev.get("tid", 0), float(ev.get("ts", 0.0)))
+        elif cat == "python_function" and ev.get("ph") == "X":
+            py_by_tid[ev.get("tid", 0)].append(
+                (float(ev.get("ts", 0.0)), float(ev.get("dur", 0.0)), str(ev.get("name", ""))))
+        elif "kernel" in cat.lower() and ev.get("ph") == "X":
+            corr = (ev.get("args") or {}).get("correlation")
+            if corr is not None:
+                kernels.append((float(ev.get("dur", 0.0)), str(ev.get("name", "")), corr))
+
+    # per-tid sweep: replay frames + queries in ts order, keep the active frame stack
+    queries_by_tid: dict[int, list[tuple[float, int]]] = defaultdict(list)
+    for ki, (dur, name, corr) in enumerate(kernels):
+        if corr in launches:
+            tid, ts = launches[corr]
+            queries_by_tid[tid].append((ts, ki))
+    parts: dict[str, float] = defaultdict(float)
+    unmatched: dict[str, float] = defaultdict(float)
+    for tid, queries in queries_by_tid.items():
+        frames = sorted(py_by_tid.get(tid, []))
+        queries.sort()
+        stack: list[tuple[float, str]] = []           # (end_ts, name), outermost..innermost
+        fi = 0
+        for ts, ki in queries:
+            while fi < len(frames) and frames[fi][0] <= ts:
+                f_ts, f_dur, f_name = frames[fi]
+                if f_ts + f_dur >= ts:                # still active at query time
+                    while stack and stack[-1][0] < f_ts:
+                        stack.pop()
+                    stack.append((f_ts + f_dur, f_name))
+                fi += 1
+            while stack and stack[-1][0] < ts:
+                stack.pop()
+            hit = None
+            for _, f_name in reversed(stack):         # deepest matching frame wins
+                hit = _frame_part(f_name)
+                if hit:
+                    break
+            dur = kernels[ki][0]
+            if hit is None:
+                leaf = stack[-1][1] if stack else "<no python frame>"
+                unmatched[leaf] += dur
+                hit = "other"
+            parts[hit] += dur
+    top = sorted(unmatched.items(), key=lambda kv: -kv[1])[:10]
+    return dict(parts), top
 
 
 def _save(fig, out: Path) -> None:
@@ -307,17 +410,22 @@ def main(
     part_shares: dict[str, dict[str, float]] = {}
     kernel_shares: dict[str, dict[str, float]] = {}
     for cid, d in tdirs.items():
+        parts, unmatched = {}, []
         stacks = next(iter(d.glob("stacks_cuda_rank*.txt")), None)
-        if stacks:
+        if stacks and stacks.stat().st_size > 0:
             parts, unmatched = _parse_stacks(stacks)
-            part_shares[cid] = parts
-            if show_unmatched and unmatched:
-                typer.echo(f"[{cid}] top unmatched CUDA frames:")
-                for frame, usec in unmatched:
-                    typer.echo(f"    {usec / 1e3:10.1f} ms  {frame[:110]}")
         trace = next(iter(d.glob("trace_rank*.json*")), None)
         if trace:
-            kernel_shares[cid] = _parse_trace_kernels(trace)
+            events = _load_trace(trace)
+            kernel_shares[cid] = _kernel_shares(events)
+            if not parts:                    # stacks export was empty -> attribute from trace
+                parts, unmatched = _model_parts_from_trace(events)
+        if parts:
+            part_shares[cid] = parts
+        if show_unmatched and unmatched:
+            typer.echo(f"[{cid}] top unmatched CUDA time by leaf frame:")
+            for frame, usec in unmatched:
+                typer.echo(f"    {usec / 1e3:10.1f} ms  {frame[:110]}")
 
     if part_shares:
         _stacked_shares(part_shares, [n for n, _ in MODEL_PARTS],
